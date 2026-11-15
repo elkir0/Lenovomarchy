@@ -1,0 +1,11 @@
+# Kernel and upstream trees: a case-sensitive APFS volume mounted here
+/src/
+/.src.sparsebundle/
+# Unit-specific data (stock firmware, dumps, backups, inventories): never in git
+/private/
+# Build outputs
+/out/
+# Fleet worker runs
+/.fleet-runs/
+*.zip
+/reference/
