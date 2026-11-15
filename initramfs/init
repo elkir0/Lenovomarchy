@@ -279,6 +279,9 @@ if [ -n "$rootdev" ]; then
         else
             log "root: switching to $rootdev"
             killall watchdog 2>/dev/null || true
+            # Free ports 22 and 67 for the real system's sshd and DHCP
+            # server; the USB gadget stays bound and is reused as is.
+            killall dropbear dnsmasq 2>/dev/null || true
             move_failed=0
             mount -o move /dev  /newroot/dev  2>/dev/null || { log "root: move /dev failed";  move_failed=1; }
             mount -o move /proc /newroot/proc 2>/dev/null || { log "root: move /proc failed"; move_failed=1; }
