@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Offline stub for `adb` used by tests/linux-test/run-tests.sh.
+# Pure bash (no python3 dependency), configured via STUB_* env vars.
+
+set -euo pipefail
+
+state_get() {
+    local key="$1" default="${2:-}"
+    if [[ -n "${STUB_STATE_DIR:-}" && -f "$STUB_STATE_DIR/$key" ]]; then
+        cat "$STUB_STATE_DIR/$key"
+    else
+        printf '%s' "$default"
+    fi
+}
+
+state_set() {
+    local key="$1" val="$2"
+    if [[ -n "${STUB_STATE_DIR:-}" ]]; then
+        mkdir -p "$STUB_STATE_DIR"
+        printf '%s' "$val" > "$STUB_STATE_DIR/$key"
+    fi
+}
+
+log_call() {
+    if [[ -n "${STUB_STATE_DIR:-}" ]]; then
+        mkdir -p "$STUB_STATE_DIR"
+        printf '%s\n' "$*" >> "$STUB_STATE_DIR/adb.calls"
+    fi
+}
+
+mode=$(state_get mode "${STUB_ADB_MODE:-adb}")
+tid=$(state_get tid "${STUB_ADB_TID:-42}")
+is_root=$(state_get is_root "${STUB_ADB_IS_ROOT:-0}")
+
+tablet_in_adb() {
+    [[ "${STUB_ADB_TABLET_PRESENT:-1}" = "1" ]] || return 1
+    if [[ "$mode" = "adb" ]]; then
+        return 0
+    elif [[ "$mode" = "booted" && "${STUB_ADB_ON_BOOT:-1}" = "1" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+if [[ "${1:-}" = "devices" && "${2:-}" = "-l" ]]; then
+    echo "List of devices attached"
+    echo "PHONE_FAKE_SERIAL      device usb:1-2 product:Pixel model:Pixel_8 device:shiba transport_id:11"
+    if tablet_in_adb; then
+        echo "YTJ706F_FAKE_SERIAL    device usb:1-1 product:YT-J706F model:Lenovo_YT_J706F device:YT-J706F transport_id:${tid}"
+    fi
+    exit 0
+fi
+
+target_tid=""
+if [[ "${1:-}" = "-t" ]]; then
+    target_tid="${2:-}"
+    shift 2
+fi
+
+if ! tablet_in_adb; then
+    echo "error: device not found" >&2
+    exit 1
+fi
+
+if [[ -z "$target_tid" || "$target_tid" != "$tid" ]]; then
+    echo "error: device '$target_tid' not found (expected tablet tid $tid)" >&2
+    exit 1
+fi
+
+subcmd="${1:-}"
+shift || true
+
+case "$subcmd" in
+    reboot)
+        log_call "reboot $*"
+        if [[ "${1:-}" = "bootloader" ]]; then
+            state_set mode fastboot
+        fi
+        exit 0
+        ;;
+    root)
+        log_call "root"
+        if [[ "$is_root" != "1" ]]; then
+            echo "restarting adbd as root"
+            state_set is_root 1
+            state_set tid "$((tid + 1))"
+        else
+            echo "adbd is already running as root"
+        fi
+        exit 0
+        ;;
+    shell)
+        cmd="$*"
+        log_call "shell $cmd"
+        case "$cmd" in
+            "id -u")
+                if [[ "$is_root" = "1" ]]; then
+                    echo "0"
+                else
+                    echo "2000"
+                fi
+                ;;
+            "getprop ro.boot.slot_suffix")
+                echo "${STUB_SLOT_SUFFIX:-_b}"
+                ;;
+            "getprop sys.boot_completed")
+                echo "${STUB_BOOT_COMPLETED:-1}"
+                ;;
+            "getprop ro.boot.bootreason")
+                echo "${STUB_BOOTREASON:-kernel_panic}"
+                ;;
+            *"ls -1 /sys/fs/pstore"*|*"ls /sys/fs/pstore"*)
+                if [[ -n "${STUB_PSTORE_DIR:-}" && -d "$STUB_PSTORE_DIR" ]]; then
+                    ls -1 "$STUB_PSTORE_DIR"
+                fi
+                ;;
+            *)
+                echo "stub adb: unhandled shell cmd: $cmd" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    exec-out)
+        cmd="$*"
+        log_call "exec-out $cmd"
+        # Expected shape: cat '/sys/fs/pstore/<name>' or cat /sys/fs/pstore/<name>
+        path="${cmd#cat }"
+        path="${path#\'}"
+        path="${path%\'}"
+        name="${path#/sys/fs/pstore/}"
+        if [[ -z "$name" || "$name" = "$path" || "$name" == */* || "$name" == *..* ]]; then
+            echo "stub adb: invalid pstore path: $path" >&2
+            exit 1
+        fi
+        if [[ -n "${STUB_PSTORE_DIR:-}" && -f "$STUB_PSTORE_DIR/$name" ]]; then
+            cat "$STUB_PSTORE_DIR/$name"
+        else
+            echo "cat: $path: No such file or directory" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "stub adb: unsupported command: $subcmd $*" >&2
+        exit 1
+        ;;
+esac
