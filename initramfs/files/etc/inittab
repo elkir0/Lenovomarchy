@@ -1,0 +1,5 @@
+# Default inittab; /init regenerates this file at boot (the ttyGS0
+# line is added only when /dev/ttyGS0 exists).
+tty1::respawn:/sbin/getty -n -l /bin/sh 115200 tty1
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/sync

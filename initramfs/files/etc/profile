@@ -1,0 +1,7 @@
+# Minimal shell profile for the bring-up initramfs.
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PS1='yt11# '
+alias halt='echo o > /proc/sysrq-trigger'
+alias reboot='echo b > /proc/sysrq-trigger'
+alias crashlog='cat /sys/fs/pstore/dmesg-* 2>/dev/null || echo no pstore records'
+alias prev-crash='ls -l /run/pstore-prev/ 2>/dev/null; cat /run/pstore-prev/* 2>/dev/null || true'

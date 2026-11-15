@@ -1,0 +1,319 @@
+#!/bin/sh
+# Lenovomarchy bring-up initramfs init -- busybox ash, runs as PID 1.
+#
+# Makes an MT6785 tablet whose only link to the host is a USB cable
+# reachable and debuggable: CDC-ECM networking with SSH (dropbear),
+# a CDC-ACM serial shell, pstore crash-log rescue, a userspace-fed
+# hardware watchdog, an unattended autotest mode and an optional
+# switch_root to a real root file system.
+#
+# Logging: every line goes to /dev/kmsg as "<3>yt11-init: ..." (the
+# pstore console only records messages at level 3 or lower) and to
+# /dev/console.  The kernel command line holds the device serial
+# number: it is parsed here but NEVER printed, written to a file or
+# echoed into a log -- only yt11.* keys are extracted from it.
+
+TAG=yt11-init
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+log() {
+    printf '<3>%s: %s\n' "$TAG" "$*" >>/dev/kmsg 2>/dev/null
+    printf '%s: %s\n' "$TAG" "$*" >/dev/console 2>/dev/null
+}
+
+# --- mounts ---------------------------------------------------------------
+# Mount points under /sys and /dev must be created AFTER the parent
+# filesystem is mounted: an earlier mkdir would be hidden by the
+# overmount.  configfs and pstore mount points are provided by the
+# kernel when those subsystems are built in; the mkdir -p fallback
+# covers kernels that expect userspace to create them.
+
+mkdir -p /proc /sys /dev /run /tmp
+mount -t proc     proc     /proc  || log "WARN: mounting /proc failed"
+mount -t sysfs    sysfs    /sys   || log "WARN: mounting /sys failed"
+mount -t devtmpfs devtmpfs /dev   || log "WARN: mounting /dev failed"
+mkdir -p /dev/pts 2>/dev/null || true
+mount -t devpts   devpts   /dev/pts || log "WARN: mounting /dev/pts failed"
+mkdir -p /sys/kernel/config /sys/fs/pstore 2>/dev/null || true
+mount -t configfs configfs /sys/kernel/config \
+    || log "usb: configfs unavailable, gadget disabled"
+mount -t pstore   pstore   /sys/fs/pstore \
+    || log "pstore: unavailable on this kernel"
+mount -t tmpfs    tmpfs    /run   || log "WARN: mounting /run failed"
+mount -t tmpfs    tmpfs    /tmp   || log "WARN: mounting /tmp failed"
+echo yt11 > /proc/sys/kernel/hostname 2>/dev/null || true
+
+# --- kernel command line (yt11.* keys only, never printed) -----------------
+
+nowdt=0
+autotest=0
+rootdev=
+rootfstype=ext4
+rootflags=
+read -r cmdline < /proc/cmdline || true
+rest=$cmdline
+while [ -n "$rest" ]; do
+    arg=${rest%% *}
+    if [ "$arg" = "$rest" ]; then
+        rest=
+    else
+        rest=${rest#* }
+    fi
+    case "$arg" in
+        yt11.nowdt=1)      nowdt=1 ;;
+        yt11.autotest=1)   autotest=1 ;;
+        yt11.root=*)       rootdev=${arg#yt11.root=} ;;
+        yt11.rootfstype=*) rootfstype=${arg#yt11.rootfstype=} ;;
+        yt11.rootflags=*)  rootflags=${arg#yt11.rootflags=} ;;
+    esac
+done
+
+# --- watchdog --------------------------------------------------------------
+# The MT6785 watchdog maxes out at 31 s; feed it every 5 s with a 30 s
+# timeout so a hung init or kernel reboots the tablet by itself.
+
+if [ "$nowdt" != 1 ] && [ -e /dev/watchdog ]; then
+    watchdog -t 5 -T 30 /dev/watchdog &
+    log "watchdog: feeding /dev/watchdog every 5s (30s timeout)"
+fi
+
+# --- pstore rescue ---------------------------------------------------------
+
+if [ -d /sys/fs/pstore ]; then
+    for f in /sys/fs/pstore/*; do
+        [ -f "$f" ] || continue
+        name=$(basename "$f")
+        mkdir -p /run/pstore-prev
+        if cp "$f" "/run/pstore-prev/$name" 2>/dev/null; then
+            bytes=$(wc -c <"/run/pstore-prev/$name" | tr -d ' ')
+            log "pstore: saved $name ($bytes bytes)"
+        else
+            log "pstore: failed to copy $name"
+        fi
+    done
+fi
+
+# --- USB gadget: CDC-ECM + CDC-ACM -----------------------------------------
+# The gadget serial number is a constant, never the device serial.
+
+usb_state=none
+GADGET=/sys/kernel/config/usb_gadget/g1
+
+cfg_dir() { mkdir -p "$1" 2>/dev/null || { log "usb: cannot create $1"; return 1; }; }
+cfg_put() { printf '%s' "$2" >"$1" 2>/dev/null || { log "usb: cannot write $1"; return 1; }; }
+
+setup_gadget() {
+    [ -d /sys/kernel/config/usb_gadget ] || {
+        log "usb: no usb_gadget in configfs, gadget disabled"
+        return 1
+    }
+    cfg_dir "$GADGET" || return 1
+    cfg_put "$GADGET/idVendor"  0x1d6b || return 1
+    cfg_put "$GADGET/idProduct" 0x0104 || return 1
+    cfg_put "$GADGET/bcdDevice" 0x0100 || return 1
+    cfg_put "$GADGET/bcdUSB"    0x0200 || return 1
+
+    cfg_dir "$GADGET/functions/ecm.usb0" || return 1
+    cfg_put "$GADGET/functions/ecm.usb0/dev_addr"  02:59:54:31:31:01 || return 1
+    cfg_put "$GADGET/functions/ecm.usb0/host_addr" 02:59:54:31:31:02 || return 1
+    cfg_dir "$GADGET/functions/acm.GS0" || return 1
+
+    cfg_dir "$GADGET/strings/0x409" || return 1
+    cfg_put "$GADGET/strings/0x409/manufacturer" Lenovomarchy   || return 1
+    cfg_put "$GADGET/strings/0x409/product" "YT-J706F Linux"    || return 1
+    cfg_put "$GADGET/strings/0x409/serialnumber" lenovomarchy   || return 1
+
+    cfg_dir "$GADGET/configs/c.1/strings/0x409" || return 1
+    cfg_put "$GADGET/configs/c.1/strings/0x409/configuration" "ECM+ACM" || return 1
+    cfg_put "$GADGET/configs/c.1/MaxPower" 500 || return 1
+    (
+        cd "$GADGET" || exit 1
+        ln -s functions/ecm.usb0 configs/c.1/ecm.usb0 2>/dev/null || exit 1
+        ln -s functions/acm.GS0   configs/c.1/acm.GS0   2>/dev/null || exit 1
+    ) || { log "usb: linking functions into config c.1 failed"; return 1; }
+
+    # Wait up to 15 s for a UDC, then bind the gadget to it.
+    udc=
+    waited=0
+    while [ "$waited" -lt 15 ]; do
+        for d in /sys/class/udc/*; do
+            [ -e "$d" ] || continue
+            udc=$(basename "$d")
+            break
+        done
+        [ -n "$udc" ] && break
+        waited=$((waited + 1))
+        sleep 1
+    done
+    if [ -z "$udc" ]; then
+        log "usb: no UDC after 15s, gadget left unbound"
+        return 1
+    fi
+    cfg_put "$GADGET/UDC" "$udc" || return 1
+    log "usb: gadget bound to UDC $udc"
+    usb_state=bound
+    return 0
+}
+
+setup_gadget || usb_state=none
+
+# --- network, DHCP and SSH over usb0 ---------------------------------------
+# Alpine's busybox does not ship the udhcpd applet, so dnsmasq runs in
+# DHCP-only mode (see /etc/dnsmasq-usb0.conf): exactly one lease
+# (192.168.77.2 for the Mac), no router, no DNS, lease file in /run.
+
+ssh_state=down
+if [ "$usb_state" = bound ]; then
+    n=0
+    while [ "$n" -lt 10 ]; do
+        ip link show usb0 >/dev/null 2>&1 && break
+        n=$((n + 1))
+        sleep 1
+    done
+    if ip link show usb0 >/dev/null 2>&1; then
+        ip addr add 192.168.77.1/24 dev usb0 2>/dev/null || true
+        ip link set usb0 up
+        log "net: usb0 up, 192.168.77.1/24"
+
+        if dnsmasq --conf-file=/etc/dnsmasq-usb0.conf >/dev/null 2>&1; then
+            log "dhcp: dnsmasq serving 192.168.77.2 on usb0"
+        else
+            log "dhcp: dnsmasq failed to start"
+        fi
+
+        mkdir -p /run/dropbear
+        DBKEY=/run/dropbear/dropbear_ed25519_host_key
+        dropbearkey -t ed25519 -f "$DBKEY" >/dev/null 2>&1
+        if [ -s "$DBKEY" ] && [ -s /root/.ssh/authorized_keys ]; then
+            /usr/sbin/dropbear -F -E -r "$DBKEY" -p 22 -s \
+                -P /run/dropbear/dropbear.pid >/dev/console 2>&1 &
+            ssh_pid=$!
+            sleep 1
+            if kill -0 "$ssh_pid" 2>/dev/null; then
+                ssh_state=up
+                log "ssh: dropbear on port 22 (public key only)"
+            else
+                log "ssh: dropbear exited during startup"
+            fi
+        else
+            log "ssh: no host key or no authorized_keys, ssh disabled"
+        fi
+    else
+        log "net: usb0 did not appear after gadget bind"
+    fi
+fi
+
+# --- ready -----------------------------------------------------------------
+
+log "ready (usb=$usb_state, ssh=$ssh_state)"
+
+# --- autotest mode ---------------------------------------------------------
+# Stream the script output to /dev/kmsg line by line, then reboot via
+# sysrq so unattended test loops can cycle the tablet.
+
+if [ "$autotest" = 1 ]; then
+    if [ -x /autotest.sh ]; then
+        log "autotest: running /autotest.sh"
+        rm -f /run/autotest.fifo /run/autotest.log
+        if mkfifo /run/autotest.fifo; then
+            (
+                while IFS= read -r line; do
+                    printf '<3>%s: autotest: %s\n' "$TAG" "$line" \
+                        >>/dev/kmsg 2>/dev/null
+                    printf '%s\n' "$line" >>/run/autotest.log 2>/dev/null
+                done </run/autotest.fifo
+            ) &
+            pump=$!
+            /autotest.sh >/run/autotest.fifo 2>&1
+            rc=$?
+            wait "$pump" 2>/dev/null
+            log "autotest: finished rc=$rc, rebooting"
+        else
+            /autotest.sh >/run/autotest.log 2>&1
+            rc=$?
+            while IFS= read -r line; do
+                printf '<3>%s: autotest: %s\n' "$TAG" "$line" \
+                    >>/dev/kmsg 2>/dev/null
+            done </run/autotest.log
+            log "autotest: finished rc=$rc, rebooting"
+        fi
+        sync
+        echo 1 > /proc/sys/kernel/sysrq 2>/dev/null || true
+        echo b > /proc/sysrq-trigger
+        sleep 10
+        log "autotest: sysrq-b did not reboot, dropping to shells"
+    else
+        log "autotest: /autotest.sh missing or not executable"
+    fi
+fi
+
+# --- switch to a real root file system -------------------------------------
+# On any failure, log it and stay in the initramfs (shells below).
+# The watchdog daemon is stopped first so the real init owns it.
+
+if [ -n "$rootdev" ]; then
+    log "root: waiting up to 10s for $rootdev (fstype $rootfstype)"
+    n=0
+    while [ "$n" -lt 10 ]; do
+        [ -b "$rootdev" ] && break
+        n=$((n + 1))
+        sleep 1
+    done
+    if [ ! -b "$rootdev" ]; then
+        log "root: $rootdev did not appear, staying in initramfs"
+    else
+        mkdir -p /newroot
+        mounted=no
+        if [ -n "$rootflags" ]; then
+            mount -t "$rootfstype" -o "$rootflags" "$rootdev" /newroot \
+                && mounted=yes
+        else
+            mount -t "$rootfstype" "$rootdev" /newroot && mounted=yes
+        fi
+        if [ "$mounted" != yes ]; then
+            log "root: mount -t $rootfstype $rootdev failed, staying in initramfs"
+        elif [ ! -x /newroot/sbin/init ]; then
+            log "root: no /sbin/init on $rootdev, staying in initramfs"
+            umount /newroot 2>/dev/null || true
+        else
+            log "root: switching to $rootdev"
+            killall watchdog 2>/dev/null || true
+            move_failed=0
+            mount -o move /dev  /newroot/dev  2>/dev/null || { log "root: move /dev failed";  move_failed=1; }
+            mount -o move /proc /newroot/proc 2>/dev/null || { log "root: move /proc failed"; move_failed=1; }
+            mount -o move /sys  /newroot/sys  2>/dev/null || { log "root: move /sys failed";  move_failed=1; }
+            mount -o move /run  /newroot/run  2>/dev/null || { log "root: move /run failed";  move_failed=1; }
+            if [ "$move_failed" = 1 ]; then
+                log "root: incomplete mount move, staying in initramfs"
+            else
+                # switch_root must run as PID 1, hence exec.  On success
+                # it never returns; the log line only runs if exec
+                # itself fails, which also ends this script -- the
+                # respawned shells are then lost, but the message is on
+                # the console and in pstore for the next boot.
+                # shellcheck disable=SC2093
+                exec switch_root /newroot /sbin/init
+                log "root: switch_root failed, staying in initramfs"
+            fi
+        fi
+    fi
+fi
+
+# --- respawned shells via busybox init -------------------------------------
+# /etc/inittab is regenerated at boot so the ttyGS0 getty only appears
+# when the USB ACM serial device exists (absent under QEMU).
+
+serial_shell=no
+[ -c /dev/ttyGS0 ] && serial_shell=yes
+{
+    printf '# Generated by /init at boot.\n'
+    if [ "$serial_shell" = yes ]; then
+        printf 'ttyGS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyGS0\n'
+    fi
+    printf 'tty1::respawn:/sbin/getty -n -l /bin/sh 115200 tty1\n'
+    printf '::ctrlaltdel:/sbin/reboot\n'
+    printf '::shutdown:/bin/sync\n'
+} > /etc/inittab
+log "shells: usb-serial=$serial_shell fbcon=tty1, starting busybox init"
+exec /sbin/init
