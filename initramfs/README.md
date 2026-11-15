@@ -77,3 +77,15 @@ screen /dev/cu.usbmodem* 115200            # CDC-ACM serial shell
 macOS speaks CDC-ECM natively (no RNDIS); the tablet hands the Mac
 192.168.77.2 by DHCP once the gadget binds. Past crash logs live in
 `/run/pstore-prev/` (`prev-crash` alias in the shell).
+
+## A/B boot control
+
+`usr/sbin/yt11-bootctl` (`yt11-bootctl [--misc PATH] <status|mark-successful [a|b]|set-active a|b>`)
+reads and updates the 32-byte AOSP `bootloader_control` struct at offset
+2048 of the `misc` partition (located via `PARTNAME=misc` in
+`/sys/class/block/*/uevent` unless overridden with `--misc`) using only
+busybox POSIX tools and its own IEEE 802.3 CRC-32 calculation. It can
+inspect slot priorities, remaining tries, successful flags, and the
+active boot slot from `androidboot.slot_suffix`, mark a slot as
+successfully booted, or switch the active slot while refusing writes
+when the `BCAB` magic or CRC-32 check fails (`tests/bootctl/run-tests.sh`).

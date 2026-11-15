@@ -1,0 +1,309 @@
+#!/bin/sh
+# yt11-bootctl - A/B bootloader_control helper for Lenovomarchy (MT6785).
+#
+# Reads and updates the 32-byte AOSP bootloader_control struct at offset 2048
+# of the misc partition using only busybox POSIX tools (dd, od, awk, printf,
+# grep, sync).
+#
+# Exit codes:
+#   0  ok
+#   1  usage / invalid arguments / missing misc device
+#   2  bad magic or CRC32 mismatch on read
+#   3  write failure
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+PROG=${0##*/}
+MISC_OFFSET=2048
+
+usage() {
+    cat <<EOF
+Usage: $PROG [--misc PATH] <command>
+
+Commands:
+  status                 Show bootloader_control state and slot metadata
+  mark-successful [a|b]  Mark slot (default: current boot slot) successful
+  set-active a|b         Set slot active (prio=15, tries=7, successful=0)
+EOF
+}
+
+usage_die() {
+    usage >&2
+    exit 1
+}
+
+find_misc() {
+    for uevent in /sys/class/block/*/uevent; do
+        [ -r "$uevent" ] || continue
+        if grep -q '^PARTNAME=misc$' "$uevent" 2>/dev/null; then
+            dev=${uevent%/uevent}
+            dev=${dev##*/}
+            if [ -e "/dev/$dev" ]; then
+                printf '/dev/%s\n' "$dev"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+# Extract only androidboot.slot_suffix=_a|_b from /proc/cmdline;
+# never print or log the full kernel command line.
+current_slot() {
+    [ -r /proc/cmdline ] || return 1
+    key=$(grep -o '\<androidboot\.slot_suffix=_[ab]\>' /proc/cmdline 2>/dev/null | head -n 1)
+    case "$key" in
+        androidboot.slot_suffix=_a) printf 'a\n'; return 0 ;;
+        androidboot.slot_suffix=_b) printf 'b\n'; return 0 ;;
+    esac
+    return 1
+}
+
+slot_to_index() {
+    case "$1" in
+        a) printf '0\n' ;;
+        b) printf '1\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+run_awk() {
+    awk -v mode="$1" -v arg="$2" '
+    function bxor(a, b,   r, p, ba, bb) {
+        r = 0; p = 1
+        while (a > 0 || b > 0) {
+            ba = a % 2; bb = b % 2
+            if (ba != bb) r += p
+            a = int(a / 2); b = int(b / 2); p *= 2
+        }
+        return r
+    }
+
+    # Standard IEEE 802.3 CRC-32 (zlib crc32) over b[1..28], split into two
+    # 16-bit halves so arithmetic stays exact and positive in busybox awk.
+    function crc32_28(   i, k, lsb) {
+        crc_lo = 65535
+        crc_hi = 65535
+        for (i = 1; i <= 28; i++) {
+            crc_lo = bxor(crc_lo, b[i])
+            for (k = 0; k < 8; k++) {
+                lsb = crc_lo % 2
+                crc_lo = int(crc_lo / 2) + (crc_hi % 2) * 32768
+                crc_hi = int(crc_hi / 2)
+                if (lsb) {
+                    crc_lo = bxor(crc_lo, 33568)
+                    crc_hi = bxor(crc_hi, 60856)
+                }
+            }
+        }
+        crc_lo = 65535 - crc_lo
+        crc_hi = 65535 - crc_hi
+    }
+
+    {
+        for (i = 1; i <= NF; i++) {
+            b[++n] = $i + 0
+        }
+    }
+
+    END {
+        if (n != 32) {
+            printf "yt11-bootctl: short read (got %d of 32 bytes)\n", n
+            exit 1
+        }
+
+        crc32_28()
+        calc_hex = sprintf("%04x%04x", crc_hi, crc_lo)
+        stored_hex = sprintf("%02x%02x%02x%02x", b[32], b[31], b[30], b[29])
+        magic_hex = sprintf("%02x%02x%02x%02x", b[8], b[7], b[6], b[5])
+        magic_ok = (b[5] == 66 && b[6] == 67 && b[7] == 65 && b[8] == 66)
+        crc_ok = (calc_hex == stored_hex)
+
+        if (mode == "status") {
+            if (!magic_ok) {
+                printf "magic: 0x%s (BAD, expected 0x42414342)\n", magic_hex
+                if (crc_ok) {
+                    printf "crc32: 0x%s (ok)\n", stored_hex
+                } else {
+                    printf "crc32: 0x%s (MISMATCH, expected 0x%s)\n", stored_hex, calc_hex
+                }
+                exit 2
+            }
+
+            ver = b[9]
+            nb_slot = b[10] % 8
+            a_prio = b[13] % 16
+            a_tries = int(b[13] / 16) % 8
+            a_succ = int(b[13] / 128) % 2
+            b_prio = b[15] % 16
+            b_tries = int(b[15] / 16) % 8
+            b_succ = int(b[15] / 128) % 2
+
+            printf "magic: 0x%s (ok)\n", magic_hex
+            printf "version: %d\n", ver
+            printf "nb_slot: %d\n", nb_slot
+            if (arg != "") {
+                printf "current: %s\n", arg
+            }
+            printf "slot a: priority=%d tries=%d successful=%d\n", a_prio, a_tries, a_succ
+            printf "slot b: priority=%d tries=%d successful=%d\n", b_prio, b_tries, b_succ
+            if (crc_ok) {
+                printf "crc32: 0x%s (ok)\n", stored_hex
+                exit 0
+            } else {
+                printf "crc32: 0x%s (MISMATCH, expected 0x%s)\n", stored_hex, calc_hex
+                exit 2
+            }
+        }
+
+        if (!magic_ok) {
+            printf "yt11-bootctl: bad magic 0x%s (expected 0x42414342), refusing to write\n", magic_hex
+            exit 2
+        }
+        if (!crc_ok) {
+            printf "yt11-bootctl: CRC32 mismatch (stored 0x%s, computed 0x%s), refusing to write\n", stored_hex, calc_hex
+            exit 2
+        }
+
+        idx = (arg == 0) ? 13 : 15
+        other = (arg == 0) ? 15 : 13
+
+        if (mode == "mark") {
+            prio = b[idx] % 16
+            tries = int(b[idx] / 16) % 8
+            b[idx] = prio + tries * 16 + 128
+        } else if (mode == "activate") {
+            b[idx] = 15 + 7 * 16
+            oprio = b[other] % 16
+            if (oprio == 15) {
+                otries = int(b[other] / 16) % 8
+                osucc = int(b[other] / 128) % 2
+                b[other] = 14 + otries * 16 + osucc * 128
+            }
+        } else {
+            printf "yt11-bootctl: internal error: unknown mode %s\n", mode
+            exit 1
+        }
+
+        crc32_28()
+        b[29] = crc_lo % 256
+        b[30] = int(crc_lo / 256)
+        b[31] = crc_hi % 256
+        b[32] = int(crc_hi / 256)
+
+        oct = ""
+        for (i = 1; i <= 32; i++) {
+            oct = oct sprintf("\\0%03o", b[i])
+        }
+        printf "%s", oct
+        exit 0
+    }'
+}
+
+misc=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --misc)
+            [ $# -ge 2 ] || usage_die
+            misc=$2
+            shift 2
+            ;;
+        --misc=*)
+            misc=${1#--misc=}
+            [ -n "$misc" ] || usage_die
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            usage_die
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+[ $# -ge 1 ] || usage_die
+cmd=$1
+shift
+
+case "$cmd" in
+    status)
+        [ $# -eq 0 ] || usage_die
+        ;;
+    mark-successful)
+        [ $# -le 1 ] || usage_die
+        if [ $# -eq 1 ]; then
+            slot=$1
+            slot_idx=$(slot_to_index "$slot") || usage_die
+        else
+            slot=$(current_slot) || {
+                printf '%s: cannot determine current slot from /proc/cmdline\n' "$PROG" >&2
+                exit 1
+            }
+            slot_idx=$(slot_to_index "$slot") || usage_die
+        fi
+        ;;
+    set-active)
+        [ $# -eq 1 ] || usage_die
+        slot=$1
+        slot_idx=$(slot_to_index "$slot") || usage_die
+        ;;
+    *)
+        usage_die
+        ;;
+esac
+
+if [ -z "$misc" ]; then
+    misc=$(find_misc) || {
+        printf '%s: PARTNAME=misc partition not found\n' "$PROG" >&2
+        exit 1
+    }
+fi
+
+if [ ! -e "$misc" ] || [ ! -r "$misc" ]; then
+    printf '%s: cannot read %s\n' "$PROG" "$misc" >&2
+    exit 1
+fi
+
+case "$cmd" in
+    status)
+        cur=$(current_slot) || cur=
+        out=$(dd if="$misc" bs=1 skip="$MISC_OFFSET" count=32 2>/dev/null | od -An -tu1 -v | run_awk status "$cur")
+        rc=$?
+        if [ "$rc" -eq 1 ]; then
+            printf '%s\n' "$out" >&2
+            exit 1
+        fi
+        printf '%s\n' "$out"
+        exit "$rc"
+        ;;
+    mark-successful)
+        mode=mark
+        ;;
+    set-active)
+        mode=activate
+        ;;
+esac
+
+oct=$(dd if="$misc" bs=1 skip="$MISC_OFFSET" count=32 2>/dev/null | od -An -tu1 -v | run_awk "$mode" "$slot_idx")
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$oct" >&2
+    exit "$rc"
+fi
+
+if ! printf '%b' "$oct" | dd of="$misc" bs=1 seek="$MISC_OFFSET" count=32 conv=notrunc 2>/dev/null; then
+    printf '%s: write failed: %s\n' "$PROG" "$misc" >&2
+    exit 3
+fi
+sync
+exit 0
