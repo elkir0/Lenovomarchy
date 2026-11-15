@@ -1,0 +1,83 @@
+# Dependencies of `omarchy` (4.0.6) intentionally skipped on the Lenovo Yoga Tab 11 (aarch64).
+# Each entry is either x86-only, AUR-only without an ALARM package, or redundant on this tablet.
+
+# --- Bootloader & disk encryption / Btrfs snapshot stack (Android LK bootloader + ext4 userdata) ---
+limine
+efibootmgr
+plymouth-theme-omarchy
+snapper
+btrfs-assistant
+
+# --- Heavy desktop / container / virtualization stack ---
+libreoffice-fresh
+xournalpp
+moonlight-qt
+docker
+docker-buildx
+docker-compose
+ufw-docker
+lazydocker
+distrobox
+qemu-full
+qemu-user-static-binfmt
+kernel-modules-hook
+
+# --- Heavy toolchains, runtimes, OCR, printing & CJK fonts ---
+clang
+llvm
+ruby
+tobi-try
+luarocks
+lua51
+mariadb-libs
+postgresql-libs
+dotnet-runtime
+tesseract
+tesseract-data-eng
+cups
+cups-filters
+cups-pk-helper
+system-config-printer
+noto-fonts-cjk
+
+# --- x86 / proprietary / AUR-only apps not in ALARM repos (upstream chromium is in packages.extra) ---
+omarchy-chromium
+1password-beta
+1password-cli
+spotify
+zoom
+signal-desktop
+obsidian
+typora
+localsend
+pinta
+gpu-screen-recorder
+obs-studio
+kdenlive
+asdcontrol
+tzupdate
+walker
+elephant
+elephant-calc
+elephant-clipboard
+elephant-bluetooth
+elephant-desktopapplications
+elephant-files
+elephant-menus
+elephant-providerlist
+elephant-runner
+elephant-symbols
+elephant-todo
+elephant-unicode
+elephant-websearch
+yay
+
+# --- Input method & Qt5 theme bits replaced by squeekboard on tablet ---
+kvantum-qt5
+fcitx5
+fcitx5-gtk
+fcitx5-qt
+python-terminaltexteffects
+
+# --- Conflicts with NetworkManager ---
+iwd

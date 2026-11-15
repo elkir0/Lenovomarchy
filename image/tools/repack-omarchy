@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Fetch, verify, and publish upstream Omarchy packages from
+# https://pkgs.omarchy.org/stable/aarch64/ into the local [lenovomarchy] repo.
+#
+# Supply-chain verification:
+#   1. Exact filename and SHA-256 digest checked against image/tools/repack.pins.
+#   2. Detached GPG signature (.sig) verified inside the container against
+#      omarchy-keyring, whose fingerprint must match image/tools/omarchy-trusted.fpr.
+#   3. verify-noarch packages are checked to contain no ELF binaries.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/alarm.sh
+source "$SCRIPT_DIR/../lib/alarm.sh"
+
+OMARCHY_CHANNEL="${OMARCHY_CHANNEL:-stable}"
+OMARCHY_REPO_URL="${OMARCHY_REPO_URL:-https://pkgs.omarchy.org/$OMARCHY_CHANNEL/aarch64}"
+LIST_FILE="${1:-$SCRIPT_DIR/repack.list}"
+PINS_FILE="${PINS_FILE:-$SCRIPT_DIR/repack.pins}"
+FPR_FILE="${FPR_FILE:-$SCRIPT_DIR/omarchy-trusted.fpr}"
+TARGET_ARCH="${TARGET_ARCH:-aarch64}"
+
+[[ -f "$LIST_FILE" ]] || die "repack list not found: $LIST_FILE"
+[[ -f "$PINS_FILE" ]] || die "pins file not found: $PINS_FILE"
+[[ -f "$FPR_FILE"  ]] || die "trusted fingerprint file not found: $FPR_FILE"
+
+UPSTREAM_CACHE="$CACHE_DIR/omarchy-upstream/$OMARCHY_CHANNEL/aarch64"
+DEST_DIR="$REPO_DIR/$TARGET_ARCH"
+mkdir -p "$UPSTREAM_CACHE" "$DEST_DIR"
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        die "neither sha256sum nor shasum found"
+    fi
+}
+
+fetch_pinned() {
+    local pkg="$1" fname="$2" expected_sha="$3"
+    local path="$UPSTREAM_CACHE/$fname"
+    local sig="$path.sig"
+
+    if [[ -f "$path" ]]; then
+        local cur_sha
+        cur_sha="$(sha256_file "$path")"
+        if [[ "$cur_sha" != "$expected_sha" ]]; then
+            warn "Cached $fname SHA-256 mismatch ($cur_sha != $expected_sha); re-downloading"
+            rm -f "$path" "$sig"
+        fi
+    fi
+
+    if [[ ! -f "$path" ]]; then
+        log "Downloading $fname"
+        curl -fSL --retry 3 -o "$path.part" "$OMARCHY_REPO_URL/$fname"
+        mv "$path.part" "$path"
+    fi
+
+    local actual_sha
+    actual_sha="$(sha256_file "$path")"
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+        rm -f "$path"
+        die "SHA-256 mismatch for $pkg ($fname): expected $expected_sha, got $actual_sha"
+    fi
+
+    if [[ ! -f "$sig" ]]; then
+        log "Downloading $fname.sig"
+        curl -fSL --retry 3 -o "$sig.part" "$OMARCHY_REPO_URL/$fname.sig"
+        mv "$sig.part" "$sig"
+    fi
+}
+
+pin_lookup() {
+    local pkg="$1" field="$2"
+    awk -v p="$pkg" -v f="$field" '$1 == p { print $f; exit }' "$PINS_FILE"
+}
+
+kr_file="$(pin_lookup omarchy-keyring 2)"
+kr_sha="$(pin_lookup omarchy-keyring 3)"
+[[ -n "$kr_file" && -n "$kr_sha" ]] || die "omarchy-keyring must be pinned in $PINS_FILE"
+fetch_pinned "omarchy-keyring" "$kr_file" "$kr_sha"
+
+while read -r pkg mode _; do
+    [[ -z "${pkg:-}" || "$pkg" =~ ^# ]] && continue
+    fn="$(pin_lookup "$pkg" 2)"
+    sha="$(pin_lookup "$pkg" 3)"
+    [[ -n "$fn" && -n "$sha" ]] || die "package '$pkg' in $LIST_FILE has no pin in $PINS_FILE"
+    fetch_pinned "$pkg" "$fn" "$sha"
+done < "$LIST_FILE"
+
+alarm_ensure_dev aarch64
+DEV_IMG="$(alarm_dev_image aarch64)"
+
+log "Verifying GPG signatures and publishing Omarchy packages -> $DEST_DIR ($TARGET_ARCH)"
+docker run --rm --platform linux/arm64 \
+    -e "TARGET_ARCH=$TARGET_ARCH" \
+    -v "$UPSTREAM_CACHE:/upstream:ro" \
+    -v "$DEST_DIR:/out" \
+    -v "$LIST_FILE:/repack.list:ro" \
+    -v "$PINS_FILE:/repack.pins:ro" \
+    -v "$FPR_FILE:/trusted.fpr:ro" \
+    "$DEV_IMG" \
+    bash -ec '
+        set -euo pipefail
+
+        declare -A PIN_FILE PIN_SHA
+        while read -r p fn sha _; do
+            [[ -z "${p:-}" || "$p" =~ ^# ]] && continue
+            PIN_FILE["$p"]="$fn"
+            PIN_SHA["$p"]="$sha"
+        done < /repack.pins
+
+        TRUSTED_FPR="$(grep -v "^#" /trusted.fpr | tr -d "[:space:]")"
+        [[ -n "$TRUSTED_FPR" ]] || { echo "ERROR: empty trusted.fpr" >&2; exit 1; }
+
+        GNUPGHOME="$(mktemp -d)"
+        chmod 700 "$GNUPGHOME"
+        export GNUPGHOME
+        KR_WORK="$(mktemp -d)"
+        bsdtar -xf "/upstream/${PIN_FILE[omarchy-keyring]}" -C "$KR_WORK" usr/share/pacman/keyrings/omarchy.gpg
+        gpg --batch --quiet --import "$KR_WORK/usr/share/pacman/keyrings/omarchy.gpg"
+        rm -rf "$KR_WORK"
+
+        IMPORTED_FPRS="$(gpg --batch --with-colons --fingerprint | awk -F: "/^pub:/{p=1; next} /^sub:/{p=0} p && /^fpr:/{print \$10}")"
+        if [[ "$IMPORTED_FPRS" != "$TRUSTED_FPR" ]]; then
+            echo "ERROR: keyring fingerprint mismatch: expected $TRUSTED_FPR, got: $IMPORTED_FPRS" >&2
+            exit 1
+        fi
+        echo "  [gpg] trusted key verified: $TRUSTED_FPR"
+
+        while read -r pkg mode _; do
+            [[ -z "${pkg:-}" || "$pkg" =~ ^# ]] && continue
+            fname="${PIN_FILE[$pkg]}"
+            expected_sha="${PIN_SHA[$pkg]}"
+            src="/upstream/$fname"
+            sig="/upstream/$fname.sig"
+
+            echo "${expected_sha}  ${src}" | sha256sum -c --quiet -
+            gpgv --keyring "$GNUPGHOME/pubring.kbx" "$sig" "$src" 2>/dev/null
+            echo "  [ok]  $fname (sha256 + gpg sig verified)"
+
+            case "$mode" in
+                copy-any)
+                    parch="$(bsdtar -xOf "$src" .PKGINFO | awk -F" = " "\$1==\"arch\"{print \$2; exit}")"
+                    if [[ "$parch" != "any" ]]; then
+                        echo "ERROR: $pkg expected arch=any, got arch=$parch" >&2
+                        exit 1
+                    fi
+                    cp -f "$src" "/out/$fname"
+                    ;;
+
+                verify-noarch)
+                    work="$(mktemp -d)"
+                    bsdtar -xf "$src" -C "$work"
+                    elf_hits="$(find "$work" -type f -exec file -b {} + | grep -F "ELF " || true)"
+                    rm -rf "$work"
+                    if [[ -n "$elf_hits" ]]; then
+                        echo "ERROR: $pkg ($fname) is marked verify-noarch but contains ELF binaries:" >&2
+                        echo "$elf_hits" >&2
+                        exit 1
+                    fi
+                    cp -f "$src" "/out/$fname"
+                    ;;
+
+                *)
+                    echo "ERROR: unknown mode $mode for $pkg" >&2
+                    exit 1
+                    ;;
+            esac
+        done < /repack.list
+
+        rm -rf "$GNUPGHOME"
+    '
+
+alarm_repo_index "$TARGET_ARCH"
+log "Done. Repository contents:"
+ls -lh "$DEST_DIR"

@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Configure the USB composite gadget (CDC ECM + ACM) on the Lenovo Yoga Tab 11
+# (YT-J706F), assign 192.168.77.1/24 to usb0, and start dnsmasq to hand out
+# 192.168.77.2 over DHCP.
+#
+# Never reads or logs /proc/cmdline (which carries the device serial number).
+
+set -euo pipefail
+
+GADGET_DIR="/sys/kernel/config/usb_gadget/g1"
+IFACE="usb0"
+DEV_IP="192.168.77.1/24"
+DEV_MAC="02:59:54:31:31:01"
+HOST_MAC="02:59:54:31:31:02"
+DNSMASQ_PID="/run/usb-gadget-dnsmasq.pid"
+DNSMASQ_CONF="/etc/usb-gadget/dnsmasq.conf"
+
+find_udc() {
+    local u
+    for _ in $(seq 1 50); do
+        for u in /sys/class/udc/*; do
+            [[ -e "$u" ]] && { basename "$u"; return 0; }
+        done
+        sleep 0.1
+    done
+    return 1
+}
+
+any_gadget_bound() {
+    local g u
+    for g in /sys/kernel/config/usb_gadget/*; do
+        [[ -f "$g/UDC" ]] || continue
+        u="$(tr -d '[:space:]' < "$g/UDC" || true)"
+        [[ -n "$u" ]] && return 0
+    done
+    return 1
+}
+
+start_gadget() {
+    if ! mountpoint -q /sys/kernel/config; then
+        mount -t configfs none /sys/kernel/config 2>/dev/null || true
+    fi
+
+    local udc=""
+    if udc="$(find_udc)"; then
+        if ! any_gadget_bound; then
+            mkdir -p "$GADGET_DIR"
+            echo 0x1d6b > "$GADGET_DIR/idVendor"
+            echo 0x0104 > "$GADGET_DIR/idProduct"
+            echo 0x0100 > "$GADGET_DIR/bcdDevice"
+            echo 0x0200 > "$GADGET_DIR/bcdUSB"
+
+            mkdir -p "$GADGET_DIR/strings/0x409"
+            echo "lenovomarchy"   > "$GADGET_DIR/strings/0x409/serialnumber"
+            echo "Lenovomarchy"   > "$GADGET_DIR/strings/0x409/manufacturer"
+            echo "YT-J706F Linux" > "$GADGET_DIR/strings/0x409/product"
+
+            mkdir -p "$GADGET_DIR/functions/ecm.usb0"
+            echo "$DEV_MAC"  > "$GADGET_DIR/functions/ecm.usb0/dev_addr" 2>/dev/null || true
+            echo "$HOST_MAC" > "$GADGET_DIR/functions/ecm.usb0/host_addr" 2>/dev/null || true
+
+            mkdir -p "$GADGET_DIR/functions/acm.GS0"
+
+            mkdir -p "$GADGET_DIR/configs/c.1/strings/0x409"
+            echo "CDC ECM + ACM" > "$GADGET_DIR/configs/c.1/strings/0x409/configuration"
+            echo 250 > "$GADGET_DIR/configs/c.1/MaxPower"
+
+            ln -sf "$GADGET_DIR/functions/ecm.usb0" "$GADGET_DIR/configs/c.1/ecm.usb0"
+            ln -sf "$GADGET_DIR/functions/acm.GS0"  "$GADGET_DIR/configs/c.1/acm.GS0"
+
+            echo "$udc" > "$GADGET_DIR/UDC"
+        fi
+    else
+        echo "usb-gadget-setup: no UDC in /sys/class/udc" >&2
+    fi
+
+    for _ in $(seq 1 50); do
+        [[ -d "/sys/class/net/$IFACE" ]] && break
+        sleep 0.1
+    done
+
+    if [[ -d "/sys/class/net/$IFACE" ]]; then
+        ip addr replace "$DEV_IP" dev "$IFACE"
+        ip link set "$IFACE" up
+
+        if command -v dnsmasq >/dev/null 2>&1 && [[ -f "$DNSMASQ_CONF" ]]; then
+            if [[ -f "$DNSMASQ_PID" ]] && kill -0 "$(cat "$DNSMASQ_PID")" 2>/dev/null; then
+                kill "$(cat "$DNSMASQ_PID")" 2>/dev/null || true
+            fi
+            dnsmasq --conf-file="$DNSMASQ_CONF" --pid-file="$DNSMASQ_PID"
+        fi
+    fi
+}
+
+stop_gadget() {
+    if [[ -f "$DNSMASQ_PID" ]]; then
+        kill "$(cat "$DNSMASQ_PID")" 2>/dev/null || true
+        rm -f "$DNSMASQ_PID"
+    fi
+    ip link set "$IFACE" down 2>/dev/null || true
+    if [[ -f "$GADGET_DIR/UDC" ]]; then
+        echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
+    fi
+}
+
+case "${1:-start}" in
+    start) start_gadget ;;
+    stop)  stop_gadget ;;
+    *)     echo "Usage: $0 {start|stop}" >&2; exit 1 ;;
+esac

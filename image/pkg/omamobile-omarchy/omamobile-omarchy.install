@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+post_install() {
+  /usr/lib/omamobile-omarchy/lock-pam || true
+  echo "omamobile-omarchy: patch log /var/log/omamobile/omarchy-patches.log; omamobile-omarchy-patches status|verify"
+}
+post_upgrade() {
+  /usr/lib/omamobile-omarchy/lock-pam || true
+}
+pre_remove() {
+  /usr/bin/omamobile-omarchy-patches restore >/dev/null 2>&1 || true
+}

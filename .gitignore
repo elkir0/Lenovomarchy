@@ -3,9 +3,11 @@
 /.src.sparsebundle/
 # Unit-specific data (stock firmware, dumps, backups, inventories): never in git
 /private/
-# Build outputs
+# Build outputs and download cache
 /out/
+/cache/
 # Fleet worker runs
 /.fleet-runs/
 *.zip
 /reference/
+/input/

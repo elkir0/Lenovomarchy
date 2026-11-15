@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Build an Arch Linux ARM package from image/pkg/<name>/PKGBUILD inside Docker
+# and add the resulting .pkg.tar.* to $REPO_DIR/$ARCH.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/alarm.sh
+source "$SCRIPT_DIR/../lib/alarm.sh"
+
+ARCH="aarch64"
+NO_CHECK=0
+PKG_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --arch)    ARCH="$2"; shift 2 ;;
+        --nocheck) NO_CHECK=1; shift ;;
+        -*)        die "unknown option: $1" ;;
+        *)         PKG_NAME="$1"; shift ;;
+    esac
+done
+
+[[ -n "$PKG_NAME" ]] || die "usage: build-pkg [--arch aarch64] [--nocheck] <pkg-name>"
+
+PKG_SRC_DIR="$IMAGE_DIR/pkg/$PKG_NAME"
+[[ -f "$PKG_SRC_DIR/PKGBUILD" ]] || die "PKGBUILD not found at $PKG_SRC_DIR/PKGBUILD"
+
+alarm_ensure_dev "$ARCH"
+DEV_IMG="$(alarm_dev_image "$ARCH")"
+PLATFORM="$(alarm_platform "$ARCH")"
+
+DEST_DIR="$REPO_DIR/$ARCH"
+PACMAN_CACHE="$CACHE_DIR/pacman-$ARCH"
+SOURCES_CACHE="$CACHE_DIR/makepkg-sources"
+mkdir -p "$DEST_DIR" "$PACMAN_CACHE" "$SOURCES_CACHE"
+
+MAKEPKG_FLAGS="-s --noconfirm --needed"
+[[ "$NO_CHECK" -eq 1 ]] && MAKEPKG_FLAGS="$MAKEPKG_FLAGS --nocheck"
+
+log "Building $PKG_NAME for $ARCH ($PLATFORM)"
+docker run --rm --platform "$PLATFORM" \
+    -v "$PKG_SRC_DIR:/pkgsrc:ro" \
+    -v "$DEST_DIR:/repo" \
+    -v "$PACMAN_CACHE:/var/cache/pacman/pkg" \
+    -v "$SOURCES_CACHE:/sources" \
+    -e "MAKEPKG_FLAGS=$MAKEPKG_FLAGS" \
+    -e "REPO_NAME=$REPO_NAME" \
+    "$DEV_IMG" \
+    bash -ec '
+        set -euo pipefail
+
+        if [[ -f "/repo/${REPO_NAME}.db.tar.gz" ]] && ! grep -q "^\[${REPO_NAME}\]" /etc/pacman.conf; then
+            cat >> /etc/pacman.conf <<EOF
+
+[${REPO_NAME}]
+SigLevel = Optional TrustAll
+Server = file:///repo
+EOF
+        fi
+
+        pacman -Sy --noconfirm
+
+        install -d -o builder -g builder /build /out /sources
+        cp -a /pkgsrc/. /build/
+        chown -R builder:builder /build /sources
+
+        su - builder -c "
+            cd /build
+            PKGDEST=/out SRCDEST=/sources makepkg $MAKEPKG_FLAGS
+        "
+
+        cp -v /out/*.pkg.tar.* /repo/
+    '
+
+alarm_repo_index "$ARCH"
+log "Built $PKG_NAME -> $DEST_DIR"

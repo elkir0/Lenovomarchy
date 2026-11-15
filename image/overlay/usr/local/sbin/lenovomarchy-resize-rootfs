@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Grow the root ext4 filesystem to fill the underlying userdata partition on first boot.
+
+set -euo pipefail
+
+STAMP="/var/lib/lenovomarchy/rootfs-resized"
+[[ -f "$STAMP" ]] && exit 0
+
+ROOT_DEV="$(findmnt -no SOURCE / 2>/dev/null || true)"
+if [[ -z "$ROOT_DEV" || ! -b "$ROOT_DEV" ]]; then
+    if [[ -b /dev/disk/by-partlabel/userdata ]]; then
+        ROOT_DEV="$(readlink -f /dev/disk/by-partlabel/userdata)"
+    fi
+fi
+
+if [[ -z "$ROOT_DEV" || ! -b "$ROOT_DEV" ]]; then
+    echo "lenovomarchy-resize-rootfs: could not determine block device for /" >&2
+    exit 1
+fi
+
+resize2fs "$ROOT_DEV"
+mkdir -p "$(dirname "$STAMP")"
+touch "$STAMP"

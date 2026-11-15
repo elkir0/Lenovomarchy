@@ -1,0 +1,92 @@
+# Additional packages from Arch Linux ARM (aarch64) official repos for the
+# Lenovo Yoga Tab 11 (YT-J706F, MediaTek MT6785).
+
+# --- GPU & display (Mali-G76 MC4 via Mesa Panfrost) ---
+mesa
+
+# --- Firmware (MediaTek MT7663 SDIO Wi-Fi/BT firmware in /usr/lib/firmware/mediatek/mt7663*) ---
+linux-firmware-mediatek
+
+# --- Browser (native aarch64 Chromium from ALARM [extra]) ---
+chromium
+
+# --- Display manager (autologin -> Hyprland) ---
+sddm
+
+# --- Networking & USB gadget DHCP/SSH ---
+networkmanager
+dnsmasq
+iproute2
+iputils
+openssh
+wireless-regdb
+iw
+
+# --- Bluetooth ---
+bluez
+bluez-utils
+
+# --- Audio (PipeWire + WirePlumber + ALSA UCM) ---
+pipewire
+pipewire-audio
+pipewire-alsa
+pipewire-pulse
+pipewire-jack
+wireplumber
+rtkit
+alsa-utils
+alsa-ucm-conf
+
+# --- Storage, swap & filesystem utilities (includes e2fsprogs for resize2fs & kmod for depmod) ---
+zram-generator
+e2fsprogs
+dosfstools
+parted
+util-linux
+kmod
+
+# --- Desktop / Wayland session utilities ---
+hypridle
+hyprlock
+mako
+swayosd
+wf-recorder
+loupe
+papers
+dconf
+glib2
+dbus
+
+# --- Tablet / hardware utilities & diagnostics ---
+sudo
+htop
+btop
+foot
+neovim
+vim
+nano
+less
+fastfetch
+imagemagick
+ufw
+curl
+wget
+rsync
+unzip
+tar
+xz
+zstd
+jq
+lsof
+strace
+usbutils
+evtest
+drm-info
+wayland-utils
+wev
+wlr-randr
+libinput
+i2c-tools
+ethtool
+iio-sensor-proxy
+libnotify
