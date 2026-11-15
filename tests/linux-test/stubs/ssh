@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Offline stub for `ssh` used by tests/linux-test/run-tests.sh.
+# Pure bash (no python3 dependency).
+
+set -euo pipefail
+
+# Consume ssh flags (-n, -o key=val, etc.) until destination.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n)
+            shift
+            ;;
+        -o)
+            shift 2
+            ;;
+        -*)
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+dest="${1:-}"
+shift || true
+cmd="$*"
+
+[[ "$dest" = "root@192.168.77.1" ]] || { echo "stub ssh: unexpected target: $dest" >&2; exit 255; }
+
+if [[ "${STUB_SSH_REACHABLE:-0}" != "1" ]]; then
+    exit 255
+fi
+
+if [[ -n "${STUB_STATE_DIR:-}" && -f "$STUB_STATE_DIR/mode" ]]; then
+    mode=$(cat "$STUB_STATE_DIR/mode")
+    if [[ "$mode" != "booted" ]]; then
+        exit 255
+    fi
+fi
+
+if [[ "$cmd" = "true" && -n "${STUB_SSH_READY_AFTER:-}" && -n "${STUB_STATE_DIR:-}" ]]; then
+    mkdir -p "$STUB_STATE_DIR"
+    count=0
+    if [[ -f "$STUB_STATE_DIR/ssh_polls" ]]; then
+        count=$(cat "$STUB_STATE_DIR/ssh_polls")
+    fi
+    count=$((count + 1))
+    printf '%s' "$count" > "$STUB_STATE_DIR/ssh_polls"
+    if (( count < STUB_SSH_READY_AFTER )); then
+        exit 255
+    fi
+fi
+
+case "$cmd" in
+    "true")
+        exit 0
+        ;;
+    "dmesg")
+        cat <<'EOF'
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x412fd050]
+[    0.000000] Linux version 6.16.4-mt6785 (builder@mac)
+[    0.000000] Kernel command line: bootopt=64S3,32N2,64N2 console=tty0 androidboot.serialno=FAKE_LINUX_SERIAL_999
+[    1.234567] mt6785-usb 11201000.usb: gadget configured
+[    2.345678] IPv6: ADDRCONF(NETDEV_CHANGE): usb0: link becomes ready
+EOF
+        ;;
+    "uname -a")
+        echo "Linux lenovomarchy 6.16.4-mt6785 #1 SMP PREEMPT aarch64 GNU/Linux"
+        ;;
+    "cat /proc/device-tree/model")
+        printf 'Lenovo Yoga Tab 11 (YT-J706F)\0'
+        ;;
+    "ls /sys/class/udc /sys/bus/i2c/devices")
+        printf '/sys/class/udc:\n11201000.usb\n\n/sys/bus/i2c/devices:\n0-0034\n1-0050\n'
+        ;;
+    "test -e /sys/kernel/debug/devices_deferred")
+        [[ -n "${STUB_DEVICES_DEFERRED:-}" ]]
+        ;;
+    "cat /sys/kernel/debug/devices_deferred")
+        printf '%s\n' "${STUB_DEVICES_DEFERRED:-}"
+        ;;
+    "lsmod")
+        printf 'Module                  Size  Used by\nusb_f_ecm              16384  1\n'
+        ;;
+    "ip addr")
+        cat <<'EOF'
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536
+    inet 127.0.0.1/8 scope host lo
+2: usb0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+    link/ether 02:aa:bb:cc:dd:ee brd ff:ff:ff:ff:ff:ff
+    inet 192.168.77.1/24 brd 192.168.77.255 scope global usb0
+EOF
+        ;;
+    *)
+        echo "stub ssh: unsupported cmd: $cmd" >&2
+        exit 1
+        ;;
+esac

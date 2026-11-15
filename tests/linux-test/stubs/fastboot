@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Offline stub for `fastboot` used by tests/linux-test/run-tests.sh.
+# Pure bash (no python3 dependency).
+
+set -euo pipefail
+
+state_get() {
+    local key="$1" default="${2:-}"
+    if [[ -n "${STUB_STATE_DIR:-}" && -f "$STUB_STATE_DIR/$key" ]]; then
+        cat "$STUB_STATE_DIR/$key"
+    else
+        printf '%s' "$default"
+    fi
+}
+
+state_set() {
+    local key="$1" val="$2"
+    if [[ -n "${STUB_STATE_DIR:-}" ]]; then
+        mkdir -p "$STUB_STATE_DIR"
+        printf '%s' "$val" > "$STUB_STATE_DIR/$key"
+    fi
+}
+
+log_call() {
+    if [[ -n "${STUB_STATE_DIR:-}" ]]; then
+        mkdir -p "$STUB_STATE_DIR"
+        printf '%s\n' "$*" >> "$STUB_STATE_DIR/fastboot.calls"
+    fi
+}
+
+mode=$(state_get mode "${STUB_ADB_MODE:-adb}")
+
+case "${1:-}" in
+    devices)
+        if [[ "$mode" = "fastboot" ]]; then
+            printf 'YTJ706F_FAKE_SERIAL\tfastboot\n'
+        fi
+        exit 0
+        ;;
+    flash)
+        [[ "$mode" = "fastboot" ]] || { echo "fastboot: not in fastboot mode" >&2; exit 1; }
+        log_call "flash ${2:-} ${3:-}"
+        echo "Sending '${2:-}' (1024 KB) OKAY"
+        echo "Writing '${2:-}' OKAY"
+        exit 0
+        ;;
+    --set-active=*)
+        [[ "$mode" = "fastboot" ]] || { echo "fastboot: not in fastboot mode" >&2; exit 1; }
+        log_call "$1"
+        echo "Setting current slot to '${1#*=}' OKAY"
+        exit 0
+        ;;
+    reboot)
+        [[ "$mode" = "fastboot" ]] || { echo "fastboot: not in fastboot mode" >&2; exit 1; }
+        log_call "reboot"
+        state_set mode booted
+        echo "Rebooting OKAY"
+        exit 0
+        ;;
+    *)
+        echo "stub fastboot: unsupported args: $*" >&2
+        exit 1
+        ;;
+esac
