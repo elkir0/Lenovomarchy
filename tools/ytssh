@@ -1,0 +1,7 @@
+#!/bin/sh
+# SSH to the tablet's Linux over the USB network (CDC-ECM, 192.168.77.1).
+# Keepalives so a call fails fast when the tablet dies under it; -n so it
+# never eats a calling script's stdin. Never pass /proc/cmdline through it.
+exec ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+    -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@192.168.77.1 "$@"
