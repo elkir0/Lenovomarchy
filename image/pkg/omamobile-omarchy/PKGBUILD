@@ -1,0 +1,127 @@
+# NOTE: Kept under image/pkg/ for reference only. The upstream repository
+# (github.com/omarchy-mobile/omarchy-mobile) no longer exists (HTTP 404);
+# image/build-rootfs.sh uses the prebuilt arch=any archive at
+# input/prebuilt/omamobile-omarchy-0.1.32-1.2-any.pkg.tar.zst instead.
+#
+# Maintainer: Derek Ross <derek@ross.And>
+# Lenovo Yoga Tab 11 (YT-J706F) tablet build (image/pkg/omamobile-omarchy):
+# Upstream omamobile-omarchy 0.1.32 from omarchy-mobile 87b8395, adapted for an
+# Arch Linux ARM aarch64 tablet without a packaged kernel.
+pkgname=omamobile-omarchy
+pkgver=0.1.32
+pkgrel=1
+pkgdesc='Idempotent patch series over /usr/share/omarchy for Omarchy Mobile (YT-J706F tablet)'
+arch=(any)
+url='https://github.com/omarchy-mobile/omarchy-mobile'
+license=(MIT)
+depends=(
+  'omarchy>=4.0.6'
+  'omarchy<4.1'
+  patch
+  bash
+  pacman
+)
+makedepends=(git)
+install=omamobile-omarchy.install
+
+_commit=87b83956280d7e38af07124ef65f190701c881cf
+source=(
+  "omarchy-mobile::git+${url}.git#commit=${_commit}"
+  omamobile-omarchy.install
+  pacman-keeps-alarm.patch
+  update-without-kernel-package.patch
+)
+sha256sums=(
+  'SKIP'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+prepare() {
+  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
+  local dir="$sub/patches/omarchy"
+
+  grep -q "^pkgver=${pkgver}$" "$sub/PKGBUILD" || {
+    echo "ERROR: upstream PKGBUILD is not pkgver=${pkgver}" >&2
+    return 1
+  }
+
+  # Remove phone-only patches (Pixel 7 Pro SIM PIN, Tensor audio/GPS, Omarchy Menu Phone entry)
+  rm -f \
+    "$dir/0010-lock-sim-pin-unlock-before-session-password-step.patch" \
+    "$dir/0014-menu-phone-entry-under-trigger-for-mobile-settings.patch" \
+    "$dir/0020-menu-setup-audio-and-gps-open-omamobile-settings-on-a-phone.patch" \
+    "$dir/0022-lock-recheck-sim-state-when-the-lock-becomes-visible.patch"
+
+  install -m644 "$srcdir/pacman-keeps-alarm.patch" \
+    "$dir/0025-tablet-pacman-keeps-alarm.patch"
+  install -m644 "$srcdir/update-without-kernel-package.patch" \
+    "$dir/0026-tablet-update-without-kernel-package.patch"
+
+  # 0003 changes the menu font size to 16pt (phone); use 13pt on tablet.
+  sed -i 's/font-size: 16pt;/font-size: 13pt;/' \
+    "$dir/0003-shell-touch-scale-and-layout-across-bars-menus-and-popups.patch"
+}
+
+check() {
+  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
+  local dir="$sub/patches/omarchy"
+  shopt -s nullglob
+  local patches=("$dir"/[0-9][0-9][0-9][0-9]-*.patch)
+  (( ${#patches[@]} == 24 )) || {
+    echo "ERROR: expected 24 patches, found ${#patches[@]}" >&2
+    printf '  %s\n' "${patches[@]}" >&2
+    return 1
+  }
+  bash -n "$sub/bin/omamobile-omarchy-patches"
+
+  if [[ -f /usr/share/omarchy/bin/omarchy-menu ]]; then
+    local tree="$srcdir/verify-tree"
+    rm -rf "$tree"
+    cp -a /usr/share/omarchy "$tree"
+    local p
+    for p in "${patches[@]}"; do
+      patch -p1 -d "$tree" --forward --batch --silent --dry-run <"$p" || {
+        echo "ERROR: $(basename "$p") does not apply to /usr/share/omarchy" >&2
+        return 1
+      }
+      patch -p1 -d "$tree" --forward --batch --silent --no-backup-if-mismatch <"$p"
+    done
+    rm -rf "$tree"
+  fi
+}
+
+package() {
+  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
+
+  install -Dm755 "$sub/bin/omamobile-omarchy-patches" \
+    "$pkgdir/usr/bin/omamobile-omarchy-patches"
+
+  install -Dm644 "$sub/hooks/95-omamobile-omarchy-patches.hook" \
+    "$pkgdir/usr/share/libalpm/hooks/95-omamobile-omarchy-patches.hook"
+
+  install -d "$pkgdir/usr/share/omamobile/patches/omarchy"
+  install -m644 "$sub/patches/omarchy/README.md" \
+    "$pkgdir/usr/share/omamobile/patches/omarchy/README.md"
+  shopt -s nullglob
+  local p
+  for p in "$sub/patches/omarchy"/[0-9][0-9][0-9][0-9]-*.patch; do
+    install -m644 "$p" "$pkgdir/usr/share/omamobile/patches/omarchy/$(basename "$p")"
+  done
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/lib/omamobile-omarchy/lock-pam" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+pam=/etc/pam.d/omarchy-lock-password
+[[ -f $pam ]] && exit 0
+install -Dm644 /dev/stdin "$pam" <<'PAM'
+#%PAM-1.0
+auth       include      system-auth
+account    include      system-auth
+PAM
+EOF
+
+  install -Dm644 "$srcdir/omarchy-mobile/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

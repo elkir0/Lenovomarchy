@@ -1,0 +1,137 @@
+# NOTE: Kept under image/pkg/ for reference only. The upstream repository
+# (github.com/omarchy-mobile/omarchy-mobile) no longer exists (HTTP 404);
+# image/build-rootfs.sh uses the prebuilt arch=any archive at
+# input/prebuilt/omamobile-shell-0.2.94-5-any.pkg.tar.zst instead.
+#
+# Maintainer: Derek Ross <derek@ross.And>
+# Lenovo Yoga Tab 11 (YT-J706F) Wi-Fi tablet build (image/pkg/omamobile-shell):
+# Upstream omamobile-shell 0.2.94 from omarchy-mobile 87b8395, adapted for a
+# Wi-Fi-only tablet (no cellular modem, GNSS, torch, NFC, or fingerprint sensor).
+pkgname=omamobile-shell
+pkgver=0.2.94
+pkgrel=1
+pkgdesc='Quickshell plugins for Omarchy on Lenovo Yoga Tab 11 (status bar, quick settings, app drawer, task switcher, home screen, keyboard hide button, back gesture)'
+arch=(any)
+url='https://github.com/omarchy-mobile/omarchy-mobile'
+license=(MIT)
+depends=(
+  'omarchy>=4.0'
+  'quickshell>=0.3'
+  bash
+  python
+  python-dbus
+  python-gobject
+  bluez
+  networkmanager
+  iw
+  util-linux
+  power-profiles-daemon
+  wf-recorder
+  ffmpeg
+  wl-clipboard
+  libnotify
+)
+makedepends=()
+install=omamobile-shell.install
+
+_commit=87b83956280d7e38af07124ef65f190701c881cf
+_tarball="omarchy-mobile-${_commit}.tar.gz"
+_dir="omarchy-mobile-${_commit}/packages/omamobile-shell"
+source=(
+  "${_tarball}::${url}/archive/${_commit}.tar.gz"
+  omamobile-shell.install
+  tablet-shell.json
+  tablet-home.json
+  0001-tablet-quick-settings-tiles.patch
+  0002-wifi-wpa2-without-sae.patch
+  0003-tablet-quiet-pollers.patch
+)
+noextract=("${_tarball}")
+sha256sums=(
+  '27e24ba994997d7cf823730bfcc0c1ba19ab19e49e840d23efbf13ec2da9f53d'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+_plugins=(omamobile.bar omamobile.quicksettings omamobile.launcher omamobile.switcher
+          omamobile.home omamobile.keyboard omamobile.back)
+_bins=(omamobile-setup-user omamobile-launch omamobile-osk-watch omamobile-bt-agent
+       omamobile-screenrecord omamobile-widget
+       omamobile-set-pin omamobile-screenshot-open omamobile-screenshot-edit)
+
+prepare() {
+  bsdtar -xf "$srcdir/$_tarball" "$_dir"
+  cd "$srcdir/$_dir"
+  [[ $(cat version) == "$pkgver" ]] || { echo "upstream version is not $pkgver" >&2; return 1; }
+  patch -Np1 -i "$srcdir/0001-tablet-quick-settings-tiles.patch"
+  patch -Np1 -i "$srcdir/0002-wifi-wpa2-without-sae.patch"
+  patch -Np1 -i "$srcdir/0003-tablet-quiet-pollers.patch"
+  cp "$srcdir/tablet-shell.json" profile/shell.json
+  cp "$srcdir/tablet-home.json" profile/home.json
+}
+
+check() {
+  cd "$srcdir/$_dir"
+  local f p
+  for f in "${_bins[@]}"; do
+    case "$(head -n1 "bin/$f")" in
+      *python3*) python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "bin/$f" ;;
+      *bash*|*sh*) bash -n "bin/$f" ;;
+      *)         echo "bin/$f: unknown interpreter" >&2; return 1 ;;
+    esac
+  done
+  for f in plugins/omamobile.quicksettings/tile-state.sh plugins/omamobile.quicksettings/tile-action.sh \
+           plugins/omamobile.home/locate.sh; do
+    bash -n "$f"
+  done
+  for p in "${_plugins[@]}"; do
+    python3 -c 'import json, sys; m = json.load(open(sys.argv[1])); assert m["id"] == sys.argv[2], m["id"]' \
+      "plugins/$p/manifest.json" "$p"
+  done
+  python3 - profile/shell.json "${_plugins[@]}" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+shipped = set(sys.argv[2:])
+named = {config["bar"]["id"], config["bar"]["quickSettings"]} | {p["id"] for p in config["plugins"]}
+assert named <= shipped, sorted(named - shipped)
+assert [p.get("columns") for p in config["plugins"] if p["id"] == "omamobile.launcher"] == [6]
+assert not config["bar"].get("cellWatch", False) and not config["bar"].get("callWatch", False)
+PY
+  python3 -c 'import json, sys; h = json.load(open(sys.argv[1])); assert h["grid"] == {"columns": 6, "rows": 8}' profile/home.json
+}
+
+package() {
+  cd "$srcdir/$_dir"
+  local f p share="$pkgdir/usr/share/omamobile/shell"
+  for f in "${_bins[@]}"; do
+    install -Dm755 "bin/$f" "$pkgdir/usr/bin/$f"
+  done
+  for p in "${_plugins[@]}"; do
+    while IFS= read -r -d '' f; do
+      install -Dm644 "$f" "$share/$f"
+    done < <(find "plugins/$p" -type f -print0)
+  done
+  install -Dm644 plugins/README.md "$share/plugins/README.md"
+  while IFS= read -r -d '' f; do
+    install -Dm644 "$f" "$share/$f"
+  done < <(find profile branding -type f -print0)
+  install -Dm644 widgets/WIDGETS.md "$share/WIDGETS.md"
+  install -Dm644 widgets/OWL.md "$share/OWL.md"
+  while IFS= read -r -d '' f; do
+    install -Dm644 "$f" "$share/widget-${f#widgets/}"
+  done < <(find widgets/template widgets/examples -type f -print0)
+  install -Dm644 systemd/user/omamobile-setup-user.service "$pkgdir/usr/lib/systemd/user/omamobile-setup-user.service"
+  install -Dm644 environment.d/30-omamobile-screenshot.conf \
+    "$pkgdir/usr/lib/environment.d/30-omamobile-screenshot.conf"
+  install -d "$pkgdir/usr/lib/systemd/user/graphical-session-pre.target.wants"
+  ln -sfn ../omamobile-setup-user.service \
+    "$pkgdir/usr/lib/systemd/user/graphical-session-pre.target.wants/omamobile-setup-user.service"
+  install -Dm644 polkit/49-omamobile-admin-self.rules "$pkgdir/usr/share/polkit-1/rules.d/49-omamobile-admin-self.rules"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 widgets/LICENSE-owl-guide "$pkgdir/usr/share/licenses/$pkgname/LICENSE-owl-guide"
+  install -Dm644 version "$share/version"
+}

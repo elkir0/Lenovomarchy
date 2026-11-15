@@ -1,0 +1,18 @@
+# Packages fetched from https://pkgs.omarchy.org/stable/aarch64/ and published
+# into the local [lenovomarchy] pacman repository (aarch64).
+#
+# Format: <pkgname> <mode>
+#   copy-any       : upstream pkg already has arch=any; copy after SHA-256 + GPG check
+#   verify-noarch  : upstream pkg is tagged arch=aarch64; verify no ELF binaries exist
+#                    inside the archive and publish into the local repo
+
+omarchy                           verify-noarch
+omarchy-settings                  verify-noarch
+omarchy-keyring                   copy-any
+omarchy-themes-intros             copy-any
+omarchy-nvim                      copy-any
+ttf-ia-writer                     copy-any
+ttf-jetbrains-mono-nerd-basic     copy-any
+yaru-icon-theme                   copy-any
+tobi-try                          copy-any
+ufw-docker                        copy-any

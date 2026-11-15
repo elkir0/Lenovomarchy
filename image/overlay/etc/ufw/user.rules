@@ -1,0 +1,36 @@
+*filter
+:ufw-user-input - [0:0]
+:ufw-user-output - [0:0]
+:ufw-user-forward - [0:0]
+:ufw-before-logging-input - [0:0]
+:ufw-before-logging-output - [0:0]
+:ufw-before-logging-forward - [0:0]
+:ufw-user-logging-input - [0:0]
+:ufw-user-logging-output - [0:0]
+:ufw-user-logging-forward - [0:0]
+:ufw-after-logging-input - [0:0]
+:ufw-after-logging-output - [0:0]
+:ufw-after-logging-forward - [0:0]
+:ufw-reject-input - [0:0]
+:ufw-reject-output - [0:0]
+:ufw-reject-forward - [0:0]
+:ufw-track-input - [0:0]
+:ufw-track-output - [0:0]
+:ufw-track-forward - [0:0]
+
+### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in_usb0
+-A ufw-user-input -i usb0 -p tcp --dport 22 -j ACCEPT
+
+### tuple ### allow udp 67 0.0.0.0/0 any 0.0.0.0/0 in_usb0
+-A ufw-user-input -i usb0 -p udp --dport 67 -j ACCEPT
+
+### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 22 -j ACCEPT
+
+### tuple ### allow tcp 53317 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 53317 -j ACCEPT
+
+### tuple ### allow udp 53317 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p udp --dport 53317 -j ACCEPT
+
+COMMIT

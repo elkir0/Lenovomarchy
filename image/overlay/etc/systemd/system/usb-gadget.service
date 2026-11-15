@@ -1,0 +1,16 @@
+[Unit]
+Description=USB Composite Gadget (CDC ECM + ACM) for Lenovo Yoga Tab 11
+DefaultDependencies=no
+After=systemd-modules-load.service sys-kernel-config.mount
+Wants=sys-kernel-config.mount
+Before=network-pre.target getty@ttyGS0.service serial-getty@ttyGS0.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/usb-gadget-setup start
+ExecStop=/usr/local/sbin/usb-gadget-setup stop
+
+[Install]
+WantedBy=multi-user.target

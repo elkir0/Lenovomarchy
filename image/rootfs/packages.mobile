@@ -1,0 +1,9 @@
+# Touch & tablet shell packages installed by install-mobile.sh on top of the
+# Omarchy desktop layer.
+
+# --- On-screen keyboard (Wayland input-method-v2 + text-input-v3) ---
+squeekboard
+
+# --- Omarchy Mobile touch adaptations & Quickshell plugins (from [lenovomarchy]) ---
+omamobile-omarchy
+omamobile-shell

@@ -1,0 +1,3 @@
+# /etc/fstab: static file system information for Lenovo Yoga Tab 11 (YT-J706F)
+# <file system>      <dir>  <type>  <options>    <dump>  <pass>
+PARTLABEL=userdata   /      ext4    rw,relatime  0       1

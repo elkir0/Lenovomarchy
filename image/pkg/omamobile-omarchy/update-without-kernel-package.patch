@@ -1,0 +1,30 @@
+# Arch Linux ARM tablet: omarchy update on an image with no kernel package and
+# no yay.
+#
+# Against Omarchy 4.0.6.
+diff --git i/bin/omarchy-update-aur-pkgs w/bin/omarchy-update-aur-pkgs
+--- i/bin/omarchy-update-aur-pkgs
++++ w/bin/omarchy-update-aur-pkgs
+@@ -2,7 +2,8 @@
+ 
+ # omarchy:summary=Update AUR packages if any are installed
+ 
+-if pacman -Qem >/dev/null; then
++# Only run yay when yay is installed.
++if command -v yay >/dev/null && pacman -Qem >/dev/null; then
+   if omarchy-pkg-aur-accessible; then
+     echo -e "\e[32m\nUpdate AUR packages\e[0m"
+     yay -Sua --noconfirm --cleanafter --ignore gcc14,gcc14-libs
+diff --git i/bin/omarchy-update-restart w/bin/omarchy-update-restart
+--- i/bin/omarchy-update-restart
++++ w/bin/omarchy-update-restart
+@@ -9,7 +9,9 @@
+ }
+ 
+ running_kernel=$(uname -r)
+-kernel_updated=true
++# No pacman package owns the kernel (it lives in the Android boot partition).
++kernel_updated=false
+ 
+ for kernel in /usr/lib/modules/*/vmlinuz; do
+   if [[ -f $kernel ]] && pacman -Qo "$kernel" &>/dev/null; then
