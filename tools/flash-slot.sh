@@ -26,7 +26,15 @@ if [[ "$(fb_count)" != 1 ]]; then
         ytadb reboot bootloader
     else
         echo "tablet not in adb: waiting for the preloader at its next boot"
-        python3 "$REPO/tools/mtk-preloader/preloader_fastboot.py" --once --wait 300
+        python3 "$REPO/tools/mtk-preloader/preloader_fastboot.py" --once --wait 300 &
+        pf=$!
+        sleep 1
+        # Linux on the tablet: ask it to reboot so the preloader shows up.
+        if "$REPO/tools/ytssh" true 2>/dev/null; then
+            echo "Linux answers on the USB network: rebooting it"
+            "$REPO/tools/ytssh" 'sync; (sleep 1; reboot -f) >/dev/null 2>&1 &' || true
+        fi
+        wait "$pf" || true
     fi
     for _ in $(seq 1 60); do [[ "$(fb_count)" = 1 ]] && break; sleep 1; done
 fi

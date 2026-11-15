@@ -114,3 +114,26 @@ EINT, **GPIO73 `GPIO_LCD_BL_EN`**, GPIO118 hall sensor, GPIO134-139 MSDC1
 GPIO198/199 I2C7, GPIO202 LCD bias ENN. Disagreements to settle on the
 unit: LCD bias ENP is GPIO23 in the overlay, GPIO72 in the DWS; amp reset
 is GPIO24 in the overlay, GPIO153 in the DWS.
+
+## MT7663 on SDIO: status (2026-11-15, not working yet)
+
+Mainline `mtk-sd` on `11240000.mmc` gets no answer from the MT7663: CMD52
+and CMD5 time out (`host->error=0x2`) at every frequency. Ruled out on the
+unit:
+
+- Supplies: MT6359 vcn18 and vio18 always on, MT6360 vmc fixed 1.8 V and
+  vmch 3.5 V, all always on (matching stock Android's enabled regulators).
+- Enable line: GPIO99 held high from boot (stock Android keeps it high even
+  with Wi-Fi off); an `mmc-pwrseq` toggling it made no difference.
+- Pins 134-139: function MSDC1, pulls, Schmitt and IES identical to stock
+  (`mt_gpio` on Android vs debugfs on Linux); only drive strengths differ.
+- MT6359 DCXO buffers: Linux sees DCXO_CW00 = 0x4e1d (XO_WCN in mode 3,
+  not enabled); forcing XO_WCN and XO_NFC to software-on (0x4f25, module
+  `kernel/experiments/dcxo-poke`) did not help.
+
+Still to check: MSDC1 TDSEL/RDSEL pad registers (`MSDC1_IO_PAD_BASE`
++0xa0/+0xd0 in the vendor driver) for 1.8 V signalling, the MSDC1 source
+clock, the stock wlan module's own power-on (`wlan_drv_gen4_mt7663.ko`,
+`connfem.ko`, a `mediatek,mt7663_wifi_ctrl` node with an interrupt on
+GPIO149), and whether LK or Android's vendor modules toggle another GPIO
+(diff of all 210 pins with Wi-Fi off vs on showed only audio pins moving).
