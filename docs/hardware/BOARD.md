@@ -74,9 +74,43 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
 Accelerometer, gyroscope, light and proximity are served by the SCP sensor
 hub and appear nowhere in the DT; see `INVENTORY.md`.
 
-## Regulators to map
+## MT6360 (i2c5 0x34): same wiring as the reference design (begonia)
 
-The vendor names "vmch", "vmc", "vfp" belong to the MT6360 LDOs (MT6359 has
-no LDO by those names). Begonia labels MT6360 `ldo3` = `vmc` and `ldo5` =
-`vmch`; "vfp" is still to be identified among `ldo1`, `ldo2`, `ldo6`,
-`ldo7`.
+From the stock SoC DTB (`mt6360_pmu_dts`, `mt6360_ldo_dts`,
+`type_c_port0`): PMU interrupt GPIO16, Type-C/PD interrupt GPIO7, LDO
+names `ldo1` = vfp, `ldo2` = vtp, `ldo3` = vmc, `ldo5` = vmch. The begonia
+DTS's MT6360 node (same pins, same LDO names) applies as is. `vtp` (ldo2) is
+the panel/touch logic supply the vendor LCM driver calls "vddi 1.8V".
+
+## Backlight and LCD bias: one LM36274-class chip at i2c5 0x11
+
+The vendor panel driver (`hx83102p_fhdp_dsi_vdo_boe.c`) only programs the
+chip at i2c5 0x11 (`ktz8864a_*`): it reads a vendor ID from register 0x01
+(`& 0x03`, 0x2 = KTZ8864A) and then writes LM36274 registers (0x09 bias
+enable, 0x0d/0x0e VPOS/VNEG = 5.8 V, 0x02 OVP 29 V + exponential + PWM,
+0x08 backlight enable, 0x04/0x05 current), plus three extra registers
+(0xf0, 0xb1, 0x10) for the other vendor. Sequence: vddi (vtp) on, 3 ms,
+`GPIO_LCD_BL_EN` high, configure, bias enable, ENP high, 3 ms, ENN high,
+3 ms; then reset 1-0-1 (2/18/8 ms) and the DCS init. Mainline: TI LMU
+`ti,lm36274` (backlight + lm363x regulators). LK logged
+"KTZ8864A_read_byte: i2c_read failed" once, so the vendor of this unit's
+chip is still to be read from Linux (register 0x01). The SGM37604A
+(i2c7 0x36) and OCP2138 (i2c7 0x3e) drivers bind on the stock kernel but are
+not used by this panel's driver.
+
+## GPIO table of the vendor project (`tb8185p3_64.dws`)
+
+The DWS file of the GPL tree (`drivers/misc/mediatek/dws/mt6785/tb8185p3_64.dws`,
+decoded list in `private/inventory/dws-gpio-names.txt`) is the platform
+project's pin map, not always this board's: where it disagrees with the
+board overlay, the overlay wins. Useful entries: GPIO1/2 touch EINT/reset,
+GPIO7 Type-C IRQ, GPIO8 SD card detect, GPIO16 MT6360 IRQ, GPIO17-20 SPI0
+(touch), GPIO28/29 I2C5, GPIO42 `GPIO_PWM_BL_PIN`, GPIO43 DSI TE, GPIO44
+LCM reset, GPIO45/46 I2C6, GPIO55/56 I2C3, GPIO59/60 keypad columns
+`KCOL0`/`KCOL1` (begonia's volume buttons are gpio-keys on 59/60),
+GPIO67/68/70/71 smart-amp I2S (LRCK, DOUT, DIN, BCK), GPIO69 smart-amp
+EINT, **GPIO73 `GPIO_LCD_BL_EN`**, GPIO118 hall sensor, GPIO134-139 MSDC1
+(SDIO), GPIO153 smart-amp reset, GPIO189-194 PMIC audio interface,
+GPIO198/199 I2C7, GPIO202 LCD bias ENN. Disagreements to settle on the
+unit: LCD bias ENP is GPIO23 in the overlay, GPIO72 in the DWS; amp reset
+is GPIO24 in the overlay, GPIO153 in the DWS.
