@@ -370,4 +370,10 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
 - First measurement, panel lit (before that rule): 68 mAh in 20.3 min of
   s2idle, about 200 mA. With the rule, a 5 min suspend kept the screen
   dark, no watchdog fired, logind finished the operation and Wi-Fi came
-  back. Standby drain with the panel off is not measured yet.
+  back.
+- Standby drain, backlight off (2026-11-16, cable out, Wi-Fi associated,
+  20 min s2idle through `systemctl suspend`, RTC wake): 46 mAh over
+  1220 s, about 135 mA (0.57 W at 4.25 V), so roughly 48 h of standby on
+  the 6.6 Ah battery. The CPUs idling in WFI with their tick, the SoC
+  without SPM low-power modes, the powered panel (only its backlight is
+  off) and the Wi-Fi chip kept powered are what remains.
