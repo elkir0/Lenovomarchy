@@ -3,6 +3,40 @@
 Facts measured on the unit (YT-J706F, S240301 firmware, mainline 7.1
 `yt11` branch) on 2026-11-15. They outrank anything in `docs/research/`.
 
+## Resolved (2026-11-15): two causes, two kernel commits
+
+The panel shows a correct picture under mediatek-drm and Hyprland since
+kernel tree `yt11` commits `e5d7b2535` and `43b97efa8`.
+
+1. **Long packets leave the DSI in a 1.5 pull mode.** After a long packet
+   (DCS long write, data type 0x39) has gone through the DSI command
+   queue, the MT6785 DSI pulls 1.5 input pixels for every pixel it sends
+   in video mode. Executing any short packet afterwards brings the ratio
+   back to 1.0; rewriting `DSI_CMDQ*` or `DSI_CMDQ_SIZE` does not. LK's
+   last command is a short one (a DCS read), Linux's panel init and DCS
+   backlight end with long writes. Reproduced in LK's working state with
+   `tools/display/dsidcs.py 00043902,211083b9` (ratio 1.5), undone with
+   `dsidcs.py 00000500` (DCS NOP, ratio 1.0). Fix: `drm/mediatek: dsi:
+   Send a short packet before video mode on MT6785` (a DCS NOP before
+   every switch to video mode when the last command was long).
+2. **The frame rate fell to ~53-56 Hz.** With the vendor porches, mtk_dsi
+   derives 973 Mbps per lane and warns `HFP + HBP less than d-phy, FPS
+   will under 60Hz`: lines take 8.38 us (8.93 us with the non-continuous
+   clock) instead of 7.84 us. Below 60 Hz the panel repeats the picture
+   vertically (the top bar appeared three times). LK runs at 1044 Mbps.
+   Fix: `drm/panel: himax-hx83102: J706F: Run at the vendor DSI rate`
+   (mode clock 174 MHz, HFP widened to 128 so the mode stays at 60 Hz;
+   measured line 7.91 us, PLL 1044 MHz) and a continuous clock.
+
+How it was found: `tools/display/dsiwatch.py` logs the ratio with
+dmesg-comparable timestamps while mediatek-drm is loaded as a module
+(`kernel/configs/dev/drm-module.config`) on top of LK's running display
+(cmdline `clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+modprobe.blacklist=mediatek_drm`); every power-on step replayed by hand
+in LK's state kept 1.0 until a long DCS write was sent.
+
+The sections below are the investigation record.
+
 ## Symptom
 
 With mediatek-drm driving the panel, the screen shows a grey, repeated
@@ -78,8 +112,17 @@ LK's does not.
   hard reset); LK keeps it, mediatek-drm writes the whole register and
   clears it. It has no effect on the ratio.
 - mmsys `SW0_RST_B` bit 25 (DT reset ID `MT6785_MMSYS_DISP_DSI0_RST`)
-  also resets RDMA0 (its size registers return to 720×1280). After it,
-  in the LK state, the pipeline does not restart by hand.
+  also resets RDMA0 (its size registers return to 720×1280), and pulsing
+  bits 13 and 14 (`MT6785_MMSYS_DISP_OVL0_RST`, `_OVL0_2L_RST`) resets the
+  DSI and RDMA0 as well. After such a pulse the pipeline does not restart
+  by hand. Without the OVL resets at bind, LK's leftover OVL state
+  (constant-colour layer, `SRC_CON` bit 4) stalls the pipeline, so the
+  resets stay.
+- The vendor MDP reset table (`cmdq/v3/mt6785/cmdq_mdp.c`) gives SW0 bits
+  0 SMI common, 1-2 larb0/1, 3-4 CAM_MDP, 5-11 MDP engines, 19 COLOR0.
+- With a non-continuous clock, mtk_dsi sets `DSI_HSTX_CKL_WC` to the
+  pixel word count; LK uses the automatic mode (bit 16, result 0x1fa in
+  0x068), which costs ~0.55 us less per line.
 - The DSI line period under mediatek-drm is 8.31 µs (56.6 Hz) instead of
   7.85 µs (60 Hz): with the non-continuous clock the clock-lane LP
   transitions are not budgeted by the driver.
@@ -97,5 +140,8 @@ production data):
   vs output line pace, the ratio and whether BUFFER_UNDERRUN recurs.
 - `dsiframe.py`: DSI vertical phases against input line milestones.
 - `dsimon.py`: time when each `DSI_INTSTA` bit reappears after a clear.
+- `dsiwatch.py <s> [frames]`: the ratio every few frames, with
+  CLOCK_MONOTONIC timestamps comparable with dmesg.
 - `dsireinit.py [regsfile]`: stop, reset, reprogram and restart DSI0.
-- `dsidcs.py <cmdq word> ...`: send raw DSI command-queue words.
+- `dsidcs.py <cmd> ...`: send raw DSI command-queue commands (comma-
+  separated words for a long packet).
