@@ -11,8 +11,27 @@
 # The speaker amplifiers' I2S (I2S1 out, I2S2 feedback in) runs from the
 # audio PLL in low-jitter mode, as the stock Android audio configuration
 # keeps it.
+#
+# Speaker protection: when Lenovo's CS35L41 DSP firmware is installed
+# (tools/amp-firmware.sh --install), load it on the four amplifiers and route
+# their audio through it, as Android does (tweeters SPK1/SPK3, woofers
+# SPK2/SPK4, each with its own tuning). Without the files the amplifiers keep
+# the plain ASP path: a DSP without firmware would leave them silent.
 card=${1:-0}
 amixer -q -c "$card" cset name='ADDA_DL_CH1 DL1_CH1' on
 amixer -q -c "$card" cset name='ADDA_DL_CH2 DL1_CH2' on
 amixer -q -c "$card" cset name='I2S1_HD_Mux' Low_Jitter
 amixer -q -c "$card" cset name='I2S2_HD_Mux' Low_Jitter
+
+# Analog gain: 17 (17.5 dB) behind the protection firmware, as Android sets
+# it; 10 (10.5 dB) without it. The PipeWire speaker path leaves it alone.
+fw=/usr/lib/firmware/cirrus/cs35l41-dsp1-spk-prot-yt-j706f
+for n in 1 2 3 4; do
+	gain=10
+	if [ -f "$fw.wmfw" ] && [ -f "$fw-spk$n.bin" ] &&
+	   amixer -q -c "$card" cset name="SPK$n DSP1 Preload Switch" on &&
+	   amixer -q -c "$card" cset name="SPK$n PCM Source" DSP; then
+		gain=17
+	fi
+	amixer -q -c "$card" cset name="SPK$n Analog PCM Volume" "$gain"
+done

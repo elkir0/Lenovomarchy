@@ -277,7 +277,25 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
 - Amp DSP firmware (Cirrus "prince" protection): `cs35l41-dsp1-spk-prot.wmfw`
   with per-amp tunings `cs35l41-dsp1-spk-prot1..4.bin`, plus calibration
   variants, in the vendor partition's `/firmware` (not redistributable).
-  Mainline runs the amps without it (DSP bypass, no speaker protection).
+- Speaker protection (2026-11-16): the stock DT gives amp N (0x40+N-1)
+  `protN.bin`; the tunings say SPK1/SPK3 are tweeters (Tuning20210610) and
+  SPK2/SPK4 woofers ("woofer0712"), and the vendor's `smartpa_range` gives
+  5-9 ohm / 1.1-1.5 kHz resonance for amps 1 and 3, 6-10 ohm / 300-700 Hz
+  for 2 and 4: each side has a tweeter and a woofer. Android routes all four
+  through the DSP (`PCM Source` DSP, firmware "protection", analog gain 17).
+  Mainline's wm_adsp loads the same CSPL firmware (v0.27.2) once the amps
+  have `cirrus,subsystem-id = "yt-j706f"` (kernel `yt11` 176e0afce):
+  `cirrus/cs35l41-dsp1-spk-prot-yt-j706f.wmfw` plus
+  `...-yt-j706f-spkN.bin`, installed by `tools/amp-firmware.sh --install`
+  (never committed). `yt11-audio-defaults` preloads the DSP, routes the
+  amps through it and sets the analog gain to 17 when the files are there,
+  else keeps the ASP path at gain 10. The DSP runs (HALO_STATE 2,
+  heartbeat counting) and the owner heard clear speech, sides right,
+  through it at gain 10; gain 17 is set but not listened to yet. The
+  firmware's pause acknowledgement took up to six polls, one more than
+  mainline waited (yt11 7b69c0c11 waits ten). No calibration: CAL_R and
+  CAL_STATUS stay 0, so the protection runs on the tuning's nominal values
+  (Android's factory Re values, if any, live outside the vendor image).
 - Microphones: Synaptics AS33970 ("Tahiti") voice processor at 0x41 on
   i2c9 (GPIO151 SDA9 / GPIO152 SCL9, function 1; "I2C_APPM" in the GPIO
   table), enable GPIO49, reset GPIO122 (active low), interrupt GPIO12. The
