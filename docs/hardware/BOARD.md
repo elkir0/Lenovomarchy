@@ -94,6 +94,27 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
   current is negative; tested: plugged in at 100 % -> Full, unplugged ->
   Discharging at once, and the owner saw the icon change.
 
+## SoC thermal (LVTS, 2026-11-16)
+
+- The stock kernel uses the LVTS controller at 0x1100b000 (GIC SPI 100),
+  not the older AUXADC sensors: four controllers at offsets 0x0-0x300
+  holding eight sensors, big CPU x2, little CPU x3, GPU x2, VPU x1.
+  Calibration comes from the efuse at 0x11c10000: golden temperature in
+  the low byte of 0x1b0, a 24-bit `count_r` per sensor at 0x1c8, 0x1cc and
+  0x93c-0x950 (`count_rc` is unused, the vendor runs auto RCK). Conversion:
+  -204.65 * raw / 16384 + golden / 2 + 204.65 degrees C. Vendor critical
+  temperature: 117 degrees C (`tzcpu_initcfg.h`).
+- Kernel `yt11` bcba65572..f9a602693 completes the tree's partial MT6785
+  LVTS data and adds the efuse, the LVTS node and one zone per sensor:
+  passive trip 85 degrees C (big CPU, little CPU and GPU throttle on their
+  own sensors), critical trip 117 degrees C.
+- Measured on the unit: 42-45 degrees C at idle on every sensor. An
+  all-core load takes the big cores to 84-87 degrees C within 15 s; the
+  throttle then holds them at 82-93 degrees C at 1.53-1.86 GHz instead of
+  2.05 GHz. With `emul_temp` at 92 degrees C the caps are 1.796 GHz (big),
+  1.733 GHz (little) and 884 MHz (GPU), released once the real
+  temperature returns.
+
 ## USB
 
 - USB-C through the MT6360 TCPC (`i2c5` 0x4e); a redriver control GPIO30 and
