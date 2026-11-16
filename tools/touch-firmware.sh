@@ -12,7 +12,7 @@ OUT="$REPO/private/extracted"
 mkdir -p "$OUT"
 python3 -I "$REPO/tools/lp-extract.py" "$SUPER" vendor_a "$OUT/vendor_a.img"
 docker run --rm -v "$OUT:/x" alpine:3.22 sh -ec '
-    apk add -q e2fsprogs >/dev/null
+    apk add -q e2fsprogs e2fsprogs-extra >/dev/null
     debugfs -R "dump /firmware/Himax_firmware.bin /x/Himax_firmware.bin" /x/vendor_a.img'
 rm -f "$OUT/vendor_a.img"
 ls -l "$OUT/Himax_firmware.bin" | awk '{print "firmware:", $5, "bytes"}'
