@@ -381,7 +381,10 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   timekeeping: after a 60 s cycle CLOCK_BOOTTIME led CLOCK_MONOTONIC by
   56 s (0 before). With the systemd watchdogs back on, a 5 min suspend
   through `systemctl suspend` kept systemd-logind (no restart),
-  NetworkManager slept and woke, Wi-Fi reconnected.
+  NetworkManager slept and woke, Wi-Fi reconnected. Power: the same 20 min
+  measurement gave 45 mAh (about 133 mA, against 135 mA with the tick
+  running), so the gain is correctness, not battery: the standby drain
+  comes from the rest of the system, not from the CPUs' tick wakeups.
 - Panel: s2idle leaves the panel lit unless the session powers its
   backlight down. Omarchy does it before suspend through `bl_power` of the
   first backlight, the panel's DSI one (DCS brightness, which the LM36274
