@@ -17,6 +17,10 @@ o.launch_on_start("bash -c 'omarchy-toggle-enabled lock-on-start || exit 0; "
     .. "for _ in $(seq 100); do omarchy-shell lock status >/dev/null 2>&1 && break; sleep 0.2; done; "
     .. "omarchy-system-lock'")
 
+-- Auto-rotation: follow the accelerometer (iio-sensor-proxy) with the output
+-- and the touch/pen layer.
+o.launch_on_start("yt11-autorotate")
+
 -- Fit floating windows to the portrait/landscape tablet screen (800x1333 logical at scale 1.5).
 o.window({ tag = "floating-window" }, { size = { "(monitor_w*0.92)", "(monitor_h*0.65)" } })
 o.window("org.omarchy.about", { size = { "(monitor_w*0.92)", "(monitor_h*0.50)" } })

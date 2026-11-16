@@ -1,0 +1,39 @@
+#!/bin/sh
+# yt11-autorotate: rotate the Hyprland output and the touch/pen layer to
+# follow iio-sensor-proxy's accelerometer orientation (Lenovo YT-J706F).
+#
+# The panel is portrait and mounted upside down: upright ("normal") is output
+# transform 2 with the touch layer at 0, and each quarter turn moves both by
+# one step. Checked on the unit with the owner: left-up = output 3, touch 1.
+# Started by the tablet layer of the Hyprland config (tablet.lua).
+
+set -u
+
+rotate() {
+	case "$1" in
+	normal)    out=2 ;;
+	left-up)   out=3 ;;
+	right-up)  out=1 ;;
+	bottom-up) out=0 ;;
+	*) return 0 ;;
+	esac
+	touch=$(( (out + 2) % 4 ))
+	scale=$(hyprctl monitors -j | jq '.[] | select(.name == "DSI-1") | .scale')
+	[ -n "$scale" ] || return 0
+	hyprctl eval "hl.monitor({ output = \"DSI-1\", mode = \"preferred\", position = \"auto\", scale = $scale, transform = $out })" >/dev/null
+	hyprctl eval "hl.config({ input = { touchdevice = { transform = $touch }, tablet = { transform = $touch } } })" >/dev/null
+}
+
+# monitor-sensor exits when iio-sensor-proxy restarts: start it again.
+while :; do
+	monitor-sensor --accel | while read -r line; do
+		case "$line" in
+		*"Has accelerometer (orientation: "*)
+			o=${line#*orientation: }
+			rotate "${o%%,*}" ;;
+		*"orientation changed: "*)
+			rotate "${line##*: }" ;;
+		esac
+	done
+	sleep 2
+done

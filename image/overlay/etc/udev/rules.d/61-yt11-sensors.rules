@@ -1,0 +1,4 @@
+# Lenovo YT-J706F: BMI220 accelerometer axes in display coordinates, for
+# iio-sensor-proxy. Measured on the unit: the chip's +x points to the top of
+# the upright portrait image, its +y to the image's left edge.
+SUBSYSTEM=="iio", ATTR{name}=="bmi220", ENV{ACCEL_MOUNT_MATRIX}="0, 1, 0; -1, 0, 0; 0, 0, 1"

@@ -124,7 +124,34 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
 ## Sensors
 
 Accelerometer, gyroscope, light and proximity are served by the SCP sensor
-hub and appear nowhere in the DT; see `INVENTORY.md`.
+hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
+(2026-11-16), all reachable from the AP without the SCP:
+
+- The SCP firmware (`scp.img`) auto-detects an accel/gyro among
+  `lsm6dsm`, `icm4n607` and `bmi2xy` (on SPI: "acc spi_num") and a
+  light/proximity sensor among `ltr578`, `tmd2755`, `tmf8801`.
+- Light/proximity: GPIO61/62 (`GPIO_SENSOR0_I2C`) are SCP_SCL0/SDA0 but
+  also the AP's SCL1/SDA1, already muxed so by the boot loader. On i2c1:
+  Lite-On LTR-578ALS at 0x53 (part ID 0xb1 at register 0x06) and an
+  unidentified device at 0x29. No mainline driver for the LTR-578 yet.
+- Accelerometer + gyroscope: Bosch BMI220 (chip id 0x26) on GPIO63-66,
+  which are SCP_SPI2 and also the AP's SPI2 (MI, CSB, MO, CLK; found by
+  bit-banging the pins). Kernel `yt11` adds the BMI220 to the `bmi270`
+  driver and the board's spi2 node. Like the BMI260/270 it needs an
+  8 KiB initialization blob at probe, `bmi220-init-data.fw`: Bosch does not
+  publish it, and the only copy is inside the SCP firmware (signature
+  `c8 2e 00 2e`, 8192 bytes). It is copied from there to the unit's
+  `/usr/lib/firmware`, never into the repository.
+- Axes (measured with the owner): the chip's +x points to the top of the
+  upright portrait image, +y to the image's left edge. The udev rule
+  `61-yt11-sensors.rules` gives iio-sensor-proxy the mount matrix
+  `0, 1, 0; -1, 0, 0; 0, 0, 1`.
+- Auto-rotation: `yt11-autorotate`, started by Hyprland (`tablet.lua`),
+  follows `monitor-sensor` and sets the output transform (upright = 2, the
+  panel is mounted upside down) and the touch/pen transform (upright = 0),
+  both one step per quarter turn. Tested with the owner in all four
+  positions, image and touch right. It must run inside the graphical
+  session: polkit refuses the sensor claim to a process started over SSH.
 
 ## MT6360 (i2c5 0x34): same wiring as the reference design (begonia)
 
