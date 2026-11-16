@@ -349,3 +349,25 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   s2idle (`suspend_stats` success 1), power key wakes it, lock screen,
   session and touch fine, Wi-Fi reconnected. With the cable in a computer
   the suspend is still refused, by design.
+- s2idle does not freeze timekeeping: there is no cpuidle driver (no idle
+  states in the DT; `current_driver` none), and mainline PSCI cpuidle only
+  offers an s2idle state through the OSI domain hierarchy. CLOCK_MONOTONIC
+  runs through the suspend (after 22 min asleep it still equalled
+  CLOCK_BOOTTIME), the CPUs only sit in WFI with their tick, and on resume
+  systemd finds every service watchdog expired: after a 20 min suspend it
+  killed systemd-logind, which never sent PrepareForSleep(false), so
+  NetworkManager stayed asleep and Wi-Fi down. Until s2idle freezes
+  timekeeping, `/etc/systemd/system/service.d/10-yt11-no-watchdog.conf`
+  sets `WatchdogSec=0` for all services. The stock DT has PSCI idle states
+  (`standby` 0x1, `mcdi-cpu` 0x10001, `mcdi-cluster` 0x1010001, SPM-backed
+  `idledram`/`idlesyspll`/`idlebus26m`/`suspend` 0x1010002-5); the deep
+  ones need the SPM firmware mainline lacks.
+- Panel: s2idle leaves the panel lit unless the session powers its
+  backlight down. Omarchy does it before suspend through `bl_power` of the
+  first backlight, the panel's DSI one (DCS brightness, which the LM36274
+  follows: lowering it dims the screen), but `bl_power` was root-only.
+  `62-yt11-backlight.rules` opens it to the `video` group.
+- First measurement, panel lit (before that rule): 68 mAh in 20.3 min of
+  s2idle, about 200 mA. With the rule, a 5 min suspend kept the screen
+  dark, no watchdog fired, logind finished the operation and Wi-Fi came
+  back. Standby drain with the panel off is not measured yet.
