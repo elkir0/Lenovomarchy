@@ -168,6 +168,29 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   SPK3/SPK4 right, name prefixes SPK1-SPK4. Mainline does the same with
   `mediatek,speaker-i2s = "I2S1"` (kernel `yt11`): measured PLL lock and
   PUP_DONE on all four amps, muted, digital silence only.
+- First audible test (2026-11-16, owner listening): clear speech from the
+  speakers, left and right on the right sides (landscape, camera on top),
+  through PipeWire at 50 % with the amps at 0 dB digital and 10.5 dB
+  analog. Two faults came first. They were found by playing constant
+  S32_LE patterns with the amps muted while sampling LRCK (GPIO32) and DO
+  (GPIO34) together:
+  - The mt6785 AFE driver declared a 32-bit memif mode (as mt8192 does).
+    With `HD_MODE` 2 the MT6785 DL1 memif reads 16-bit samples, so every
+    32-bit sample left as two half-words over two frames: crackle, no
+    voice. S32_LE now uses the 24-bit mode, MSB aligned (`AFE_DL1_CON0`
+    `HD_MODE` 1, `HALIGN` 1).
+  - The speaker link forced S32_LE on the amps, which take 16 or 24-bit
+    words: mainline wrote a 32-bit word length into `SP_RX_WL` (0x4840),
+    and once the data was right the amps played silence. The link now runs
+    S24_LE (32-bit slots on the wire, 24-bit words). A 24-bit or 32-bit
+    `SP_FORMAT` RX width both play correctly.
+  - Android keeps I2S1 and I2S2 in low-jitter mode (`I2S1_HD_Mux` and
+    `I2S2_HD_Mux` stay `Low_Jitter` even in its "HD_OFF" paths);
+    `yt11-audio-defaults` does the same. Whether the amps need it was not
+    tested.
+- At boot the AFE logs `-EBUSY` on register 0x52c
+  (`I2S1_TINYCONN_CH1_MUX DAPM update failed`) while it is runtime
+  suspended. Playback is not affected; not investigated yet.
 - Amp DSP firmware (Cirrus "prince" protection): `cs35l41-dsp1-spk-prot.wmfw`
   with per-amp tunings `cs35l41-dsp1-spk-prot1..4.bin`, plus calibration
   variants, in the vendor partition's `/firmware` (not redistributable).
