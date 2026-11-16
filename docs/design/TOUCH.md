@@ -81,7 +81,25 @@ not a port of the vendor driver.
 KUnit test covers the event parser (finger and pen packets, exception
 patterns) with packets built from the vendor's parsing code.
 
-## Verification on the unit (later phase)
+## Status on the unit (2026-11-15)
+
+Fingers work under Hyprland: the stock firmware uploads, passes the
+hardware CRC check, and `evtest` shows MT protocol B contacts over
+X 98-1177, Y 39-1932 with clean releases (kernel tree `yt11`: driver
+`afce91f0b`, fixes `49cbee5c6`, board node `cfe98d034`). The worker's
+first version had three faults the KUnit test could not catch because it
+shared them: partition sizes and offsets read big-endian (the vendor
+reads them little-endian), chip ID bytes compared in the wrong order
+(the register reads `00 2e 10 83`), and a silent failure path in the
+panel-follower start. Not tested yet: the pen (no pen at hand),
+suspend/resume, exception recovery, KUnit rerun after the fixes.
+
+Firmware install: `tools/touch-firmware.sh <super.img> --install` pulls
+`/vendor/firmware/Himax_firmware.bin` out of the unit's own `super`
+backup into `private/extracted/` and copies it to the tablet as
+`/usr/lib/firmware/himax/hx83102p.bin`.
+
+## Verification on the unit (remaining)
 
 Needs the tablet on a mainline kernel with SPI0 and the panel: `evtest`
 over SSH while the owner touches and draws at agreed moments; firmware
