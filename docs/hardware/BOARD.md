@@ -362,6 +362,18 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   (`standby` 0x1, `mcdi-cpu` 0x10001, `mcdi-cluster` 0x1010001, SPM-backed
   `idledram`/`idlesyspll`/`idlebus26m`/`suspend` 0x1010002-5); the deep
   ones need the SPM firmware mainline lacks.
+- CPU idle states do not work on mainline (2026-11-16): PSCI is v1.1 in
+  platform-coordinated mode (no OSI). With the stock encodings in the DT
+  (`mcdi-cpu` 0x10001, `mcdi-cluster` 0x1010001, `local-timer-stop`) the
+  kernel hung about 1.9 s after boot, at the CPUs' first idle; the boot
+  loader fell back to the other slot. With the states disabled by default
+  and enabled one at a time in sysfs, even the stock retention state
+  `standby` (0x1, no power-down) on CPU7 alone froze the whole system at
+  once, without a watchdog reset (owner's forced restart). The vendor
+  kernel drives these states through MediaTek's MCDI and SPM (firmware it
+  loads); without them the firmware's CPU_SUSPEND never returns. So no
+  cpuidle and no PSCI-based s2idle until MCDI/SPM is understood; the
+  experiment was reverted.
 - Panel: s2idle leaves the panel lit unless the session powers its
   backlight down. Omarchy does it before suspend through `bl_power` of the
   first backlight, the panel's DSI one (DCS brightness, which the LM36274
