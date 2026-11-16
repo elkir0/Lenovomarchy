@@ -135,8 +135,9 @@ kernel tree `yt11` commit `86667a9cb`.
   (WMT command 0xfc7a times out). Bluetooth first, then Wi-Fi, works:
   the image blacklists `mt7663s` and `yt11-wifi-after-bt.service` loads it
   once the Bluetooth controller is set up (15 s fallback).
-- Measured: 2.4 GHz link at -30 dBm, 270 Mbit/s (MCS15, 40 MHz), ping
-  through the access point; Bluetooth scan finds nearby devices.
+- Measured: 2.4 GHz link at -30 dBm, 270-300 Mbit/s (MCS15, 40 MHz,
+  short GI), 8.7 MB/s (70 Mbit/s) on a 50 MB download; Bluetooth scan
+  finds nearby devices.
 - The efuse holds no MAC address: NetworkManager uses a stable per-network
   address (`wifi.cloned-mac-address=stable`).
 - The image used to mask `wpa_supplicant.service`, which NetworkManager
@@ -147,3 +148,32 @@ vmc 1.8 V, vmch 3.5 V; also vemc, vbif28, va09, vrf18, which turned out
 unneeded), MSDC1 pin mux (`GPIO_MISC` bit 9), pad TDSEL/RDSEL, host
 registers at CMD time (identical to the stock driver's dump), MT6359
 DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
+
+## Audio wiring (stock DT, 2026-11-15)
+
+- Speakers: four CS35L41 (Rev B2) on i2c6 (400 kHz, GPIO45/46) at
+  0x40-0x43, one shared reset GPIO24 (active low), interrupts GPIO14, 13,
+  4, 3 (level low), boost 4500 mA / 1000 nH / 15 uF, `asp-sdout-hiz` 3,
+  GPIO2 output source 4.
+- Their audio bus is the SoC's **I2S1 output** (GPIO31 BCK, GPIO32 LRCK,
+  GPIO34 DO, function 1), with feedback on the **I2S2 input** (GPIO33,
+  function 1): the stock sound node says `mtk_spk_i2s_out = <1>` and
+  `mtk_spk_i2s_in = <2>`. The `GPIO_SMARTPA_*` names the DWS table gives
+  GPIO67-71 (I2S3/I2S0) come from the MediaTek reference design and are
+  wrong for this board (same as its name for GPIO24). On I2S3 the SoC pads
+  toggle but the amps never see a clock: their PLL does not lock and the
+  power-up times out (`Enable(1) failed: -110`).
+- The stock machine driver runs one I2S link to all four at 48 kHz with a
+  3.072 MHz bit clock as the amps' PLL reference, SPK1/SPK2 left,
+  SPK3/SPK4 right, name prefixes SPK1-SPK4. Mainline does the same with
+  `mediatek,speaker-i2s = "I2S1"` (kernel `yt11`): measured PLL lock and
+  PUP_DONE on all four amps, muted, digital silence only.
+- Amp DSP firmware (Cirrus "prince" protection): `cs35l41-dsp1-spk-prot.wmfw`
+  with per-amp tunings `cs35l41-dsp1-spk-prot1..4.bin`, plus calibration
+  variants, in the vendor partition's `/firmware` (not redistributable).
+  Mainline runs the amps without it (DSP bypass, no speaker protection).
+- Microphones: Synaptics AS33970 voice processor on i2c9 0x41, enable
+  GPIO49, reset GPIO122, interrupt GPIO12. Its path to the SoC is not
+  settled: I2S2 input is the amps' feedback, I2S0 input (GPIO70, stock
+  state `aud_gpio_i2s0_on`) is a candidate. The vendor driver is
+  `sound/soc/codecs/as33970/` in the GPL tree.
