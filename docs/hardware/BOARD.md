@@ -11,7 +11,7 @@ wiring facts below carry over.
 
 | Bus (mainline label) | Address | Part | Wiring |
 |---|---|---|---|
-| `i2c3` | 0x55 | TI bq27541 fuel gauge | `ti,bq27541`, no GPIO |
+| `i2c3` | 0x55 | TI bq27541 fuel gauge | `ti,bq27541`, no GPIO; bus at 100 kHz (see below) |
 | `i2c5` | 0x34 (+0x1a, 0x4e, 0x64) | MT6360 PMU / PMIC / TCPC / LDO | as on begonia (`mediatek,mt6360`, IRQ via pinctrl) |
 | `i2c5` | 0x11 | KTZ8864A backlight + LCD bias | Kinetic clone of TI LM36274 (begonia uses `ti,lm36274` at 0x11 on `i2c0`) |
 | `i2c6` | 0x40, 0x41, 0x42, 0x43 | 4x CS35L41 speaker amps | shared reset GPIO24; IRQs GPIO14 (0x40), GPIO13 (0x41), GPIO4 (0x42), GPIO3 (0x43), pull-up |
@@ -73,6 +73,22 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
   DT enables `ACCDET` with headset thresholds (reference design). Mainline
   keeps the accdet node disabled and the sound card has no jack; the
   PipeWire profile has a single speaker port.
+
+## Fuel gauge (bq27541, 2026-11-16)
+
+- The stock i2c3 node sets no `clock-frequency`, so the vendor I2C driver
+  runs it at its default 100 kHz. At 400 kHz the first data byte of each
+  read is right but the second often comes back as 0xff: capacity 65380 %,
+  6278 degrees C, cycle count 65353, health "Overheat", a current of exactly
+  -256 mA (0xff00). At 100 kHz, 200 raw reads and 60 s of sysfs samples
+  are clean.
+- Measured on the unit: 4.33 V, 31.7 degrees C, full charge 6638 mAh of
+  7500 mAh design (UPower: 88.5 % capacity), 73 cycles.
+- On battery (USB unplugged, desktop idle, followed over Wi-Fi): about
+  -400 mA at 4.29 V, the charge counter falling 7 mAh per minute to match,
+  UPower 1.76 W and 16 h to empty. Right after unplugging, the status stays
+  "Full" while the gauge's full-charge flag is set, as usual for this
+  family.
 
 ## USB
 
