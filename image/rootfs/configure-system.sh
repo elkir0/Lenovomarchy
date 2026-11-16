@@ -108,14 +108,16 @@ systemctl enable \
     bluetooth.service \
     usb-gadget.service \
     lenovomarchy-resize-rootfs.service \
+    yt11-wifi-after-bt.service \
     serial-getty@ttyGS0.service
 
-# Mask wait-online and conflicting wireless daemons so boot never hangs offline
+# Mask wait-online so boot never hangs offline, and iwd, which conflicts
+# with NetworkManager. wpa_supplicant stays: NetworkManager starts it over
+# D-Bus for Wi-Fi.
 systemctl mask \
     systemd-networkd-wait-online.service \
     NetworkManager-wait-online.service \
-    iwd.service \
-    wpa_supplicant.service
+    iwd.service
 
 mkdir -p /var/lib/sddm
 chown -R sddm:sddm /var/lib/sddm

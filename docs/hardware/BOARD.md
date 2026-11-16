@@ -115,25 +115,35 @@ GPIO198/199 I2C7, GPIO202 LCD bias ENN. Disagreements to settle on the
 unit: LCD bias ENP is GPIO23 in the overlay, GPIO72 in the DWS; amp reset
 is GPIO24 in the overlay, GPIO153 in the DWS.
 
-## MT7663 on SDIO: status (2026-11-15, not working yet)
+## MT7663 on SDIO: working (2026-11-15)
 
-Mainline `mtk-sd` on `11240000.mmc` gets no answer from the MT7663: CMD52
-and CMD5 time out (`host->error=0x2`) at every frequency. Ruled out on the
-unit:
+**The module's supply is switched by GPIO158.** The stock kernel drives
+it high; Linux left it an input, so the chip was unpowered and never
+answered on SDIO (CMD52/CMD5 timeouts, its interrupt line GPIO149 read 0).
+Found by listing the pins that stock Android drives as high outputs
+(`private/inventory/wifi-oracle/on.txt`) and raising them one by one:
+with GPIO158 high, GPIO149 goes high and the card enumerates at SDR104.
+The board DT now has a fixed regulator on GPIO158 as the slot's `vmmc`
+and an `mmc-pwrseq-simple` for the PMU enable GPIO99 (active low),
+kernel tree `yt11` commit `86667a9cb`.
 
-- Supplies: MT6359 vcn18 and vio18 always on, MT6360 vmc fixed 1.8 V and
-  vmch 3.5 V, all always on (matching stock Android's enabled regulators).
-- Enable line: GPIO99 held high from boot (stock Android keeps it high even
-  with Wi-Fi off); an `mmc-pwrseq` toggling it made no difference.
-- Pins 134-139: function MSDC1, pulls, Schmitt and IES identical to stock
-  (`mt_gpio` on Android vs debugfs on Linux); only drive strengths differ.
-- MT6359 DCXO buffers: Linux sees DCXO_CW00 = 0x4e1d (XO_WCN in mode 3,
-  not enabled); forcing XO_WCN and XO_NFC to software-on (0x4f25, module
-  `kernel/experiments/dcxo-poke`) did not help.
+- Both SDIO functions enumerate: function 1 Wi-Fi (`mt7663s`, firmware
+  `mediatek/mt7663pr2h.bin` + `mt7663_n9_v3.bin` from linux-firmware, N9
+  3.1.1), function 2 Bluetooth (`btmtksdio`).
+- Both functions download the same ROM patch. Racing, Wi-Fi fails with
+  "Failed to get patch semaphore"; Wi-Fi first makes Bluetooth setup fail
+  (WMT command 0xfc7a times out). Bluetooth first, then Wi-Fi, works:
+  the image blacklists `mt7663s` and `yt11-wifi-after-bt.service` loads it
+  once the Bluetooth controller is set up (15 s fallback).
+- Measured: 2.4 GHz link at -30 dBm, 270 Mbit/s (MCS15, 40 MHz), ping
+  through the access point; Bluetooth scan finds nearby devices.
+- The efuse holds no MAC address: NetworkManager uses a stable per-network
+  address (`wifi.cloned-mac-address=stable`).
+- The image used to mask `wpa_supplicant.service`, which NetworkManager
+  needs for Wi-Fi; only iwd stays masked.
 
-Still to check: MSDC1 TDSEL/RDSEL pad registers (`MSDC1_IO_PAD_BASE`
-+0xa0/+0xd0 in the vendor driver) for 1.8 V signalling, the MSDC1 source
-clock, the stock wlan module's own power-on (`wlan_drv_gen4_mt7663.ko`,
-`connfem.ko`, a `mediatek,mt7663_wifi_ctrl` node with an interrupt on
-GPIO149), and whether LK or Android's vendor modules toggle another GPIO
-(diff of all 210 pins with Wi-Fi off vs on showed only audio pins moving).
+Ruled out on the way (all equal to stock): supplies (vcn18, vio18, MT6360
+vmc 1.8 V, vmch 3.5 V; also vemc, vbif28, va09, vrf18, which turned out
+unneeded), MSDC1 pin mux (`GPIO_MISC` bit 9), pad TDSEL/RDSEL, host
+registers at CMD time (identical to the stock driver's dump), MT6359
+DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).

@@ -1,0 +1,12 @@
+[Unit]
+Description=Load the MT7663 Wi-Fi driver after its Bluetooth function
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/yt11-wifi-after-bt
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

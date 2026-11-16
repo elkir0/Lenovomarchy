@@ -1,0 +1,13 @@
+#!/bin/sh
+# Load the MT7663 Wi-Fi driver once the Bluetooth function of the same
+# chip has finished its setup (its controller shows up in bluetoothctl),
+# or after 15 s if Bluetooth never comes up.
+i=0
+while [ $i -lt 30 ]; do
+	if bluetoothctl list 2>/dev/null | grep -q Controller; then
+		break
+	fi
+	sleep 0.5
+	i=$((i + 1))
+done
+exec modprobe mt7663s
