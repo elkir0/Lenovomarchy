@@ -192,3 +192,11 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   vemc forced on. Something it needs at start-up (a clock, a supply or a
   pin the stock kernel sets) is still missing. The microphones do not work
   yet.
+- Clues for the next attempt: the second-stage loader does run. After the
+  ROM's `O`, a 16-byte read from sub-address 0 returns `0x80` in the word at
+  offset 4 (a 4-byte read at offset 4 returns 0), writes and reads at
+  offset 8 behave as plain memory, and writing message words at offset 0
+  makes it answer with error codes (`0x7e`, `0x7f`) in byte 0 without the
+  done bit. Its mailbox layout or handshake differs from what the vendor
+  loader's code suggests; disassembling the 8 KiB Thumb loader
+  (`iflash_boot2`) is the next step.
