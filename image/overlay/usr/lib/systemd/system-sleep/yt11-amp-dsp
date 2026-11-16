@@ -1,0 +1,40 @@
+#!/bin/sh
+# systemd-sleep hook: unload the CS35L41 speaker-protection firmware for
+# system sleep and load it again on resume.
+#
+# With the firmware loaded on the four amplifiers, a 20 min s2idle drew
+# about 185 mA, against about 135 mA with it unloaded, whether the
+# amplifiers were hibernating or kept awake; awake, the firmware costs
+# nothing measurable. Reloading takes well under a second after resume.
+# See docs/hardware/BOARD.md (speaker protection, standby drain).
+state=/run/yt11-amp-dsp
+card=
+for f in /proc/asound/card*/id; do
+	[ "$(cat "$f" 2>/dev/null)" = mt6785mt6359 ] || continue
+	card=${f#/proc/asound/card}
+	card=${card%/id}
+done
+[ -n "$card" ] || exit 0
+
+case "$1" in
+pre)
+	: > "$state.new"
+	for n in 1 2 3 4; do
+		amixer -c "$card" cget name="SPK$n DSP1 Preload Switch" 2>/dev/null |
+			grep -q ': values=on' || continue
+		amixer -q -c "$card" cset name="SPK$n PCM Source" ASP
+		amixer -q -c "$card" cset name="SPK$n DSP1 Preload Switch" off
+		echo "$n" >> "$state.new"
+	done
+	mv "$state.new" "$state"
+	;;
+post)
+	[ -f "$state" ] || exit 0
+	while read -r n; do
+		amixer -q -c "$card" cset name="SPK$n DSP1 Preload Switch" on &&
+		amixer -q -c "$card" cset name="SPK$n PCM Source" DSP
+	done < "$state"
+	rm -f "$state"
+	;;
+esac
+exit 0

@@ -26,25 +26,12 @@ amixer -q -c "$card" cset name='I2S2_HD_Mux' Low_Jitter
 # Analog gain: 17 (17.5 dB) behind the protection firmware, as Android sets
 # it; 10 (10.5 dB) without it. The PipeWire speaker path leaves it alone.
 fw=/usr/lib/firmware/cirrus/cs35l41-dsp1-spk-prot-yt-j706f
-dsp=0
 for n in 1 2 3 4; do
 	gain=10
 	if [ -f "$fw.wmfw" ] && [ -f "$fw-spk$n.bin" ] &&
 	   amixer -q -c "$card" cset name="SPK$n DSP1 Preload Switch" on &&
 	   amixer -q -c "$card" cset name="SPK$n PCM Source" DSP; then
 		gain=17
-		dsp=1
 	fi
 	amixer -q -c "$card" cset name="SPK$n Analog PCM Volume" "$gain"
 done
-
-# With the firmware running, mainline hibernates an idle amplifier after 3 s
-# (runtime PM). Waking it takes tens of milliseconds and now and then fails
-# ("Wake failed, re-enter hibernate"), which leaves that amplifier silent for
-# the whole next stream. Android never hibernates them (the stock device tree
-# lacks cirrus,hibernate-enable): keep them out of runtime suspend too.
-if [ "$dsp" = 1 ]; then
-	for ctl in /sys/bus/i2c/drivers/cs35l41/*/power/control; do
-		[ -e "$ctl" ] && echo on > "$ctl"
-	done
-fi

@@ -313,16 +313,31 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   rises. `SPK_OUTPUT_POWER` stays 0 and does not help. The vendor
   `spkN_fast_switch1-3.txt` parameter sets (written to
   CSPL_UPDATE_PARAMS_CONFIG, then CSPL_COMMAND 8) do not select the channel.
-- Hibernation: mainline puts an idle amp with running firmware into DSP
-  hibernation after 3 s of runtime-PM idle. Waking it takes tens of
-  milliseconds (up to four rounds of ten polls) and once in a while fails
-  (`Wake failed, re-enter hibernate: -42`), which left that amp silent for
-  the whole next stream. The stock DT has no `cirrus,hibernate-enable`, so
-  Android never hibernates them; `yt11-audio-defaults` sets their runtime
-  PM `power/control` to `on` when the DSP is used (standby cost not
-  measured yet). Unmasking the DSP's
-  mailbox interrupt (IRQ2_MASK2 bit 20, as the vendor driver does around
-  each command) does not make acknowledgements faster.
+- Hibernation: with the firmware running, mainline puts an idle amp into
+  DSP hibernation after 3 s of runtime-PM idle. Entering hibernation raises
+  the amp's interrupt and the IRQ handler resumes the device, so each amp
+  went through a hibernate and wake cycle every 3.3 s (about 2 s spent
+  hibernated in 25 minutes), and about once per half hour a wake failed
+  (`Wake failed, re-enter hibernate: -42`), leaving that amp silent for
+  the next stream. yt11 a8c3f3b01 keeps the IRQ disabled while the DSP
+  hibernates, as the vendor driver does: the amps now stay hibernated
+  with no interrupts, and 240 hibernate and wake cycles all woke (SPK1
+  after four out-of-hibernate retries, the others after two). The stock DT
+  has no `cirrus,hibernate-enable`, so Android never hibernates them at
+  all. Unmasking the DSP's mailbox interrupt (IRQ2_MASK2 bit 20, as the
+  vendor driver does around each command) does not make
+  acknowledgements faster.
+- Standby drain with the firmware loaded (2026-11-16, cable out, Wi-Fi
+  associated, 20 min s2idle through `systemctl suspend`): 63 mAh with the
+  amps kept awake and 62 mAh with them hibernating (about 185 mA), against
+  45 mAh with the firmware unloaded (about 133 mA, the earlier floor).
+  Awake, screen off, the firmware costs nothing measurable (about 224 mA
+  unloaded, loaded with the amps hibernating, or loaded with them awake),
+  and interrupt counts over a 90 s s2idle are the same either way, so the
+  extra 50 mA only exists in system sleep; its consumer is not found yet.
+  The systemd-sleep hook `yt11-amp-dsp` unloads the firmware before sleep
+  and loads it again on resume (well under a second): 47 mAh in 20 min,
+  about 139 mA, and all four amps play their channel after resume.
 - Every boot logs `0-0040: Failed to set mailbox cmd 2 (status 1)`: SPK1
   does not acknowledge the resume of the first stream after the firmware
   loads (PipeWire's probe, digital silence). All four amps play on the
