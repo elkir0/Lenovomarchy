@@ -172,8 +172,23 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   with per-amp tunings `cs35l41-dsp1-spk-prot1..4.bin`, plus calibration
   variants, in the vendor partition's `/firmware` (not redistributable).
   Mainline runs the amps without it (DSP bypass, no speaker protection).
-- Microphones: Synaptics AS33970 voice processor on i2c9 0x41, enable
-  GPIO49, reset GPIO122, interrupt GPIO12. Its path to the SoC is not
-  settled: I2S2 input is the amps' feedback, I2S0 input (GPIO70, stock
-  state `aud_gpio_i2s0_on`) is a candidate. The vendor driver is
-  `sound/soc/codecs/as33970/` in the GPL tree.
+- Microphones: Synaptics AS33970 ("Tahiti") voice processor at 0x41 on
+  i2c9 (GPIO151 SDA9 / GPIO152 SCL9, function 1; "I2C_APPM" in the GPIO
+  table), enable GPIO49, reset GPIO122 (active low), interrupt GPIO12. The
+  vendor machine driver makes it the codec of the I2S2 capture link
+  (`as33970-aif`); I2S2 only has its DI pin (GPIO33) and shares I2S1's bit
+  and frame clocks, and the yoga11 defconfig (`CONFIG_TARGET_PROJECT_P530`)
+  gives that link no MCLK.
+- The AS33970 has no firmware of its own: after reset its ROM boot loader
+  answers `0x43` ('C') at sub-address 0 and waits. Android's
+  `/vendor/bin/tahiti_i2c_load` pushes `/vendor/etc/tahiti_dsp/partition_boot2flash.img`
+  (firmware 4.15.13.0: an 8 KiB second-stage loader at 0x100, then 158
+  blocks of 4 KiB at 0x10000) at every boot. `tools/audio/tahiti_load.py`
+  reimplements that protocol (16-bit big-endian sub-addresses, 32-bit
+  little-endian words). Measured on the unit (2026-11-16): the ROM accepts
+  the second-stage loader (`S`, `S`, then `O` after `D`), but that loader
+  (`iflash_boot2`) never posts its ready word `0x80` and does not answer
+  messages, with or without I2S1 clocks running and with vbif28, va09 and
+  vemc forced on. Something it needs at start-up (a clock, a supply or a
+  pin the stock kernel sets) is still missing. The microphones do not work
+  yet.

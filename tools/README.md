@@ -12,6 +12,8 @@ Utilities for targeting, flashing, backing up, and test-booting the Lenovo Yoga 
 - [`backup-partitions.sh`](backup-partitions.sh): stream and SHA-256 verify all partitions (except `userdata`), UFS boot LUs, and GPT headers over root `adb` into `private/`.
 - [`mtk-preloader/preloader_fastboot.py`](mtk-preloader/preloader_fastboot.py): catch the MediaTek preloader CDC-ACM boot window and send `FASTBOOT` (or `METAMETA`) without hardware keys.
 - [`mtk-preloader/test_preloader_fastboot.py`](mtk-preloader/test_preloader_fastboot.py): pty-based unit tests for `preloader_fastboot.py`.
+- [`audio/audprobe.py`](audio/audprobe.py): on the tablet, play digital silence on the muted speaker path and dump the AFE I2S registers, pad levels and CS35L41 power/PLL status.
+- [`audio/tahiti_load.py`](audio/tahiti_load.py): on the tablet, load the AS33970 voice processor's firmware over i2c-dev (stage 1 works; see `docs/hardware/BOARD.md`); offline tests in [`audio/test_tahiti_load.py`](audio/test_tahiti_load.py).
 
 ## One-command Linux boot test
 
