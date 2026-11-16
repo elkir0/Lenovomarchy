@@ -86,9 +86,13 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
   7500 mAh design (UPower: 88.5 % capacity), 73 cycles.
 - On battery (USB unplugged, desktop idle, followed over Wi-Fi): about
   -400 mA at 4.29 V, the charge counter falling 7 mAh per minute to match,
-  UPower 1.76 W and 16 h to empty. Right after unplugging, the status stays
-  "Full" while the gauge's full-charge flag is set, as usual for this
-  family.
+  UPower 1.76 W and 16 h to empty.
+- The gauge keeps its full-charge flag set for a while after unplugging,
+  and mainline `bq27xxx` let that flag win over the current sign: the
+  battery reported "Full" while discharging, and the desktop bar kept its
+  charging icon. Kernel `yt11` 85098c2c8 reports discharging whenever the
+  current is negative; tested: plugged in at 100 % -> Full, unplugged ->
+  Discharging at once, and the owner saw the icon change.
 
 ## USB
 
