@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""yt11-sensor-firmware: install the BMI220 initialization data from the
+unit's own SCP firmware partition (Lenovo YT-J706F).
+
+The BMI220 accelerometer/gyroscope needs an 8 KiB initialization blob at
+probe ("bmi220-init-data.fw"). Bosch does not publish it; the stock SCP
+sensor-hub firmware carries a copy. Read the scp_a partition (else scp_b),
+find the blob by its signature, check its shape, write it to
+/usr/lib/firmware and reload the driver. The partitions are only read.
+Run by yt11-sensor-firmware.service while the file is missing.
+"""
+import os
+import subprocess
+import sys
+import time
+
+OUT = "/usr/lib/firmware/bmi220-init-data.fw"
+PARTS = ["/dev/disk/by-partlabel/scp_a", "/dev/disk/by-partlabel/scp_b"]
+SIZE = 8192
+HEAD = bytes.fromhex("c82e002e")  # first instruction words of BMI2 init data
+TAIL = bytes.fromhex("802e00c1")  # padding that ends it
+
+
+def find_blob(data):
+    if b"bmi2xy" not in data:
+        return None
+    i = data.find(HEAD)
+    while i >= 0:
+        blob = data[i:i + SIZE]
+        if len(blob) == SIZE and blob.endswith(TAIL):
+            return blob
+        i = data.find(HEAD, i + 1)
+    return None
+
+
+def main():
+    for _ in range(20):  # the partition links appear with udev
+        if any(os.path.exists(p) for p in PARTS):
+            break
+        time.sleep(0.5)
+    for part in PARTS:
+        try:
+            with open(part, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            print(f"{part}: {e}")
+            continue
+        blob = find_blob(data)
+        if blob is None:
+            print(f"{part}: no BMI2 initialization data found")
+            continue
+        tmp = OUT + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(blob)
+        os.chmod(tmp, 0o644)
+        os.rename(tmp, OUT)
+        print(f"installed {OUT} from {part}")
+        # The driver failed its probe without the file: probe again.
+        subprocess.run(["modprobe", "-r", "bmi270_spi"], check=False)
+        subprocess.run(["modprobe", "bmi270_spi"], check=False)
+        return 0
+    print("BMI220 initialization data not found: no motion sensor")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,11 @@
+[Unit]
+Description=Install the BMI220 motion sensor data from the SCP firmware
+ConditionPathExists=!/usr/lib/firmware/bmi220-init-data.fw
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/yt11-sensor-firmware
+
+[Install]
+WantedBy=multi-user.target

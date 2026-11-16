@@ -51,6 +51,7 @@ for link in \
     /etc/systemd/system/display-manager.service \
     /etc/systemd/system/multi-user.target.wants/usb-gadget.service \
     /etc/systemd/system/multi-user.target.wants/lenovomarchy-resize-rootfs.service \
+    /etc/systemd/system/multi-user.target.wants/yt11-sensor-firmware.service \
     /etc/systemd/system/multi-user.target.wants/sshd.service \
     /etc/systemd/system/multi-user.target.wants/NetworkManager.service \
     /etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service; do

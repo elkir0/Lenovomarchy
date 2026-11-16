@@ -140,8 +140,12 @@ hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
   driver and the board's spi2 node. Like the BMI260/270 it needs an
   8 KiB initialization blob at probe, `bmi220-init-data.fw`: Bosch does not
   publish it, and the only copy is inside the SCP firmware (signature
-  `c8 2e 00 2e`, 8192 bytes). It is copied from there to the unit's
-  `/usr/lib/firmware`, never into the repository.
+  `c8 2e 00 2e`, 8192 bytes, ending with `80 2e 00 c1`). It never goes into
+  the repository: `yt11-sensor-firmware.service` extracts it on the unit
+  from its own `scp_a` partition (else `scp_b`, read only) while
+  `/usr/lib/firmware/bmi220-init-data.fw` is missing, then reloads the
+  driver. Tested by deleting the file and rebooting: same blob back, IMU
+  and auto-rotation up in the same boot.
 - Axes (measured with the owner): the chip's +x points to the top of the
   upright portrait image, +y to the image's left edge. The udev rule
   `61-yt11-sensors.rules` gives iio-sensor-proxy the mount matrix
