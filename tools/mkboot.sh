@@ -13,7 +13,9 @@
 
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXTRA="console=tty0 loglevel=7 panic=5 oops=panic"
+# mem_sleep_default=s2idle: the "deep" suspend never wakes up on mainline
+# (docs/hardware/BOARD.md, Suspend).
+EXTRA="console=tty0 loglevel=7 panic=5 oops=panic mem_sleep_default=s2idle"
 if [[ "${1:-}" = "--cmdline" ]]; then EXTRA="$EXTRA $2"; shift 2; fi
 [[ $# -eq 4 ]] || { sed -n '2,4p' "$0"; exit 2; }
 KERNEL="$1" DTB="$2" RAMDISK="$3" OUT="$4"

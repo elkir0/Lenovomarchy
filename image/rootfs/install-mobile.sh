@@ -85,6 +85,9 @@ rm -f "$HOME_DIR/.local/state/omarchy/toggles/screensaver-off" \
       "$HOME_DIR/.local/state/omarchy/toggles/lock-after-screensaver"
 mkdir -p "$HOME_DIR/.local/state/omarchy/toggles"
 touch "$HOME_DIR/.local/state/omarchy/toggles/stay-awake"
+# omamobile turns suspend off (phones); suspend-to-idle works on this tablet,
+# so keep the system menu's Suspend entry.
+rm -f "$HOME_DIR/.local/state/omarchy/toggles/suspend-off"
 
 # Mask omamobile-setup-user.service so it does not re-run without --adopt at
 # first login and overwrite monitors.lua with phone scale=3.

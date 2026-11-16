@@ -318,12 +318,34 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
 
 ## Suspend (s2idle, 2026-11-16)
 
-- `mem_sleep` offers `s2idle` and `deep`; only s2idle was tried, woken by
-  the MT6359 RTC alarm (`rtcwake -m freeze`).
-- With the USB gadget bound and the cable in, `mtu3` refuses to suspend
-  (`-EBUSY`) and the attempt aborts cleanly.
-- With the gadget unbound, one s2idle cycle succeeded (`suspend_stats`
-  success 1): the display came back (DSI pace and DPMS normal) and Wi-Fi
-  reassociated. But `mt7663s_suspend` hits a `WARN` in `kthread_park` and
-  two 20 s MCU message timeouts, so entering suspend takes about 40 s;
-  the Wi-Fi driver's suspend path needs work before suspend is usable.
+- `mem_sleep` offers `s2idle` and `deep`, and the kernel defaulted to
+  `deep`. A `deep` cycle (`rtcwake -m mem`) never came back: no RTC wake,
+  no power-key wake, a forced restart was needed, nothing in pstore (the
+  vendor kernel loads SPM firmware that mainline does not have). The
+  project now defaults to s2idle twice over: `mem_sleep_default=s2idle`
+  in `tools/mkboot.sh` and `MemorySleepMode=s2idle` in
+  `/etc/systemd/sleep.conf.d/10-yt11-s2idle.conf`.
+- Wi-Fi (MT7663 SDIO): without WoWLAN, suspend disconnects and cfg80211
+  restores the regulatory domain while the chip is already asleep;
+  `mt7615_regd_notifier` then waited 20 s for each firmware reply (40 s
+  to enter suspend). Kernel `yt11` 6d52a72ac skips those firmware updates
+  while suspended (`pm.suspended`, as mt7921 does; `mt7615_start()`
+  reprograms them on resume) and ea3b186dc unparks the tx status worker on
+  resume (its double park gave the `kthread_park` WARN). An s2idle cycle
+  with a 20 s alarm now takes 21 s, twice in a row, Wi-Fi back each time.
+- USB: `mtu3` refuses suspend (`-EBUSY`) while `mtu->connected`, i.e. while
+  a host uses the gadget. That is intended, but the PHY never reported the
+  cable being pulled, so the flag stayed set forever and suspend never
+  worked. Kernel `yt11` de556a1dd wires the MT6360 TCPC connector to the
+  mtu3 role switch (otg, peripheral by default for the USB network at
+  boot, xHCI enabled for the host role) and a5610bec2 makes a "none" role
+  stop the device and a new attach start it. Unplugged, the UDC goes to
+  "not attached"; plugged back into a host, it enumerates again.
+- Omarchy's mobile setup turns the menu's Suspend entry off
+  (`suspend-off` toggle); `install-mobile.sh` removes that toggle. The
+  power key opens Omarchy's system menu (logind ignores it), and the PMIC
+  power key is a wakeup source.
+- Tested with the owner (2026-11-16): cable out, power -> Suspend, 138 s in
+  s2idle (`suspend_stats` success 1), power key wakes it, lock screen,
+  session and touch fine, Wi-Fi reconnected. With the cable in a computer
+  the suspend is still refused, by design.
