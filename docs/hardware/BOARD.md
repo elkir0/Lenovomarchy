@@ -247,10 +247,13 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   toggle but the amps never see a clock: their PLL does not lock and the
   power-up times out (`Enable(1) failed: -110`).
 - The stock machine driver runs one I2S link to all four at 48 kHz with a
-  3.072 MHz bit clock as the amps' PLL reference, SPK1/SPK2 left,
-  SPK3/SPK4 right, name prefixes SPK1-SPK4. Mainline does the same with
-  `mediatek,speaker-i2s = "I2S1"` (kernel `yt11`): measured PLL lock and
-  PUP_DONE on all four amps, muted, digital silence only.
+  3.072 MHz bit clock as the amps' PLL reference, name prefixes SPK1-SPK4.
+  Mainline does the same with `mediatek,speaker-i2s = "I2S1"` (kernel
+  `yt11`): measured PLL lock and PUP_DONE on all four amps, muted, digital
+  silence only.
+- Physical layout (owner listening, landscape, camera on top): SPK1 (0x40)
+  and SPK4 (0x43) are on the right side, SPK2 (0x41) and SPK3 (0x42) on the
+  left; SPK1/SPK3 are tweeters, SPK2/SPK4 woofers (see below).
 - First audible test (2026-11-16, owner listening): clear speech from the
   speakers, left and right on the right sides (landscape, camera on top),
   through PipeWire at 50 % with the amps at 0 dB digital and 10.5 dB
@@ -289,13 +292,41 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   `...-yt-j706f-spkN.bin`, installed by `tools/amp-firmware.sh --install`
   (never committed). `yt11-audio-defaults` preloads the DSP, routes the
   amps through it and sets the analog gain to 17 when the files are there,
-  else keeps the ASP path at gain 10. The DSP runs (HALO_STATE 2,
-  heartbeat counting) and the owner heard clear speech, sides right,
-  through it at gain 10; gain 17 is set but not listened to yet. The
-  firmware's pause acknowledgement took up to six polls, one more than
-  mainline waited (yt11 7b69c0c11 waits ten). No calibration: CAL_R and
-  CAL_STATUS stay 0, so the protection runs on the tuning's nominal values
-  (Android's factory Re values, if any, live outside the vendor image).
+  else keeps the ASP path at gain 10. The owner heard correct stereo through
+  it at gain 17 and 55 % volume. The firmware's pause acknowledgement takes
+  three to six polls about 1 ms apart, one more than mainline waited (yt11
+  7b69c0c11 waits ten, as the vendor driver does). No calibration: CAL_R
+  and CAL_STATUS stay 0, so the protection runs on the tuning's nominal
+  values (Android's factory Re values, if any, live outside the vendor
+  image).
+- Channel selection through the DSP: the firmware plays its first input
+  (DSP RX1 Source = ASPRX1) while its `CH_BAL` control
+  (CSPL_CHANNEL_BALANCE) is 0, and the second one at 0x7FFFFF. Android sets
+  ASPRX1 to slot 0 and ASPRX2 to slot 1 on all four amps, so it presumably
+  sets `CH_BAL` per amp from somewhere else (not in `audio_device.xml`, not
+  found). Mainline instead gives each amp its own channel in ASPRX1 and
+  the other in ASPRX2 (right amps SP_FRAME_RX_SLOT 0x001, left amps 0x100;
+  yt11 machine driver); with `CH_BAL` 0 that plays the right channel per
+  side in both the DSP and the ASP path. Both RX channels on one slot (0x101) leave the DSP silent.
+  The checks were silent: play a one-sided 200 Hz tone at low volume, zero
+  `BDLOG_MAX_EXC` (writable) first, then see which amps' maximum excursion
+  rises. `SPK_OUTPUT_POWER` stays 0 and does not help. The vendor
+  `spkN_fast_switch1-3.txt` parameter sets (written to
+  CSPL_UPDATE_PARAMS_CONFIG, then CSPL_COMMAND 8) do not select the channel.
+- Hibernation: mainline puts an idle amp with running firmware into DSP
+  hibernation after 3 s of runtime-PM idle. Waking it takes tens of
+  milliseconds (up to four rounds of ten polls) and once in a while fails
+  (`Wake failed, re-enter hibernate: -42`), which left that amp silent for
+  the whole next stream. The stock DT has no `cirrus,hibernate-enable`, so
+  Android never hibernates them; `yt11-audio-defaults` sets their runtime
+  PM `power/control` to `on` when the DSP is used (standby cost not
+  measured yet). Unmasking the DSP's
+  mailbox interrupt (IRQ2_MASK2 bit 20, as the vendor driver does around
+  each command) does not make acknowledgements faster.
+- Every boot logs `0-0040: Failed to set mailbox cmd 2 (status 1)`: SPK1
+  does not acknowledge the resume of the first stream after the firmware
+  loads (PipeWire's probe, digital silence). All four amps play on the
+  next stream.
 - Microphones: Synaptics AS33970 ("Tahiti") voice processor at 0x41 on
   i2c9 (GPIO151 SDA9 / GPIO152 SCL9, function 1; "I2C_APPM" in the GPIO
   table), enable GPIO49, reset GPIO122 (active low), interrupt GPIO12. The
