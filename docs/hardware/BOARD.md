@@ -39,10 +39,18 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
 
 - Power: MT6359 PMIC power key (vendor `kpd-sw-pwrkey` 116).
 - Volume up: MT6359 PMIC "home"/reset key (vendor `kpd-sw-rstkey` 115).
-- Volume down: SoC keypad controller at 0x10010000, matrix entry 0 =
-  `KEY_VOLUMEDOWN` (vendor `kpd-hw-init-map` starts with 0x72). Mainline has
-  `mediatek,mt6779-keypad` for this block; the 7.1 tree's `mt6785.dtsi` has
-  no keypad node yet.
+- Volume down: SoC keypad controller at 0x10010000 (GIC SPI 75), matrix
+  entry 0 = `KEY_VOLUMEDOWN` (vendor `kpd-hw-init-map` starts with 0x72),
+  single-key mode, row 0 / column 0 on KPROW0 (GPIO58) and KPCOL0 (GPIO59),
+  function 1, already muxed by LK. Kernel `yt11` adds the keypad node
+  (`mediatek,mt6779-keypad`). Tested 2026-11-16 with the owner pressing: Vol+
+  reports `KEY_VOLUMEUP` on `mtk-pmic-keys`, Vol- reports `KEY_VOLUMEDOWN` on
+  `mt6779-keypad`, nothing crosses over.
+- No cover sensor: the stock DT has no hall node and stock Android exposed
+  no lid input. The DWS name `GPIO_HALL_1_PIN` on GPIO118 comes from the
+  reference design. The keyboard/touchpad accessory nodes (I2C-HID MCU at
+  0x60/0x61, `mcu_hall_int_gpio` GPIO196) belong to an optional keyboard
+  accessory; not ported, not tested.
 
 ## Wi-Fi/BT (MT7663)
 
@@ -61,7 +69,10 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
 - Amps: see `i2c6` above; the unit carries protection and calibration
   firmware `cs35l41-dsp1-spk-prot.wmfw`, `cs35l41-dsp1-spk-cali.wmfw` and
   per-amp `.bin` tunings (`prot1`..`prot4`, `cali1`..`cali4`).
-- No headphone jack; the `ACCDET` input exists anyway.
+- No headphone jack (confirmed by the owner, 2026-11-16), although the stock
+  DT enables `ACCDET` with headset thresholds (reference design). Mainline
+  keeps the accdet node disabled and the sound card has no jack; the
+  PipeWire profile has a single speaker port.
 
 ## USB
 

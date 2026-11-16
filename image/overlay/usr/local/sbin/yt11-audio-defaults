@@ -3,10 +3,10 @@
 #
 # The playback front end (DL1, PCM device 0) is a DPCM front end: opening it
 # fails with EINVAL while no back end is routed to it, so PipeWire's profile
-# probe would find no usable profile. Route DL1 to the MT6359 DAC (the
-# headphone path; nothing is audible while "HP Mux" stays open) so the PCM
-# can be opened; the PipeWire port paths then switch between the DAC and the
-# speaker amplifiers.
+# probe would find no usable profile. Route DL1 to the MT6359 DAC (not wired
+# to anything on this board, and silent while "HP Mux" stays open) so the PCM
+# can be opened; the PipeWire speaker path then moves DL1 to the speaker
+# amplifiers.
 #
 # The speaker amplifiers' I2S (I2S1 out, I2S2 feedback in) runs from the
 # audio PLL in low-jitter mode, as the stock Android audio configuration
