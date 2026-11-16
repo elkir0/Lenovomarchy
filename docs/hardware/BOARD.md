@@ -356,9 +356,9 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   CLOCK_BOOTTIME), the CPUs only sit in WFI with their tick, and on resume
   systemd finds every service watchdog expired: after a 20 min suspend it
   killed systemd-logind, which never sent PrepareForSleep(false), so
-  NetworkManager stayed asleep and Wi-Fi down. Until s2idle freezes
-  timekeeping, `/etc/systemd/system/service.d/10-yt11-no-watchdog.conf`
-  sets `WatchdogSec=0` for all services. The stock DT has PSCI idle states
+  NetworkManager stayed asleep and Wi-Fi down (a `WatchdogSec=0` drop-in
+  for all services was the stopgap, removed since). The stock DT has PSCI
+  idle states
   (`standby` 0x1, `mcdi-cpu` 0x10001, `mcdi-cluster` 0x1010001, SPM-backed
   `idledram`/`idlesyspll`/`idlebus26m`/`suspend` 0x1010002-5); the deep
   ones need the SPM firmware mainline lacks.
@@ -372,8 +372,16 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   once, without a watchdog reset (owner's forced restart). The vendor
   kernel drives these states through MediaTek's MCDI and SPM (firmware it
   loads); without them the firmware's CPU_SUSPEND never returns. So no
-  cpuidle and no PSCI-based s2idle until MCDI/SPM is understood; the
-  experiment was reverted.
+  PSCI idle states until MCDI/SPM is understood; the experiment was
+  reverted.
+- Instead, kernel `yt11` 5861307a8 adds a WFI-only cpuidle driver
+  (`CONFIG_ARM64_WFI_S2IDLE_CPUIDLE`, binds on MT6785 only): state 0 WFI
+  for runtime idle, state 1 WFI with `->enter_s2idle()` and a target
+  residency the governor never reaches. s2idle now freezes the tick and
+  timekeeping: after a 60 s cycle CLOCK_BOOTTIME led CLOCK_MONOTONIC by
+  56 s (0 before). With the systemd watchdogs back on, a 5 min suspend
+  through `systemctl suspend` kept systemd-logind (no restart),
+  NetworkManager slept and woke, Wi-Fi reconnected.
 - Panel: s2idle leaves the panel lit unless the session powers its
   backlight down. Omarchy does it before suspend through `bl_power` of the
   first backlight, the panel's DSI one (DCS brightness, which the LM36274
