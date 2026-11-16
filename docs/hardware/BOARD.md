@@ -200,3 +200,15 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   done bit. Its mailbox layout or handshake differs from what the vendor
   loader's code suggests; disassembling the 8 KiB Thumb loader
   (`iflash_boot2`) is the next step.
+
+## Suspend (s2idle, 2026-11-16)
+
+- `mem_sleep` offers `s2idle` and `deep`; only s2idle was tried, woken by
+  the MT6359 RTC alarm (`rtcwake -m freeze`).
+- With the USB gadget bound and the cable in, `mtu3` refuses to suspend
+  (`-EBUSY`) and the attempt aborts cleanly.
+- With the gadget unbound, one s2idle cycle succeeded (`suspend_stats`
+  success 1): the display came back (DSI pace and DPMS normal) and Wi-Fi
+  reassociated. But `mt7663s_suspend` hits a `WARN` in `kthread_park` and
+  two 20 s MCU message timeouts, so entering suspend takes about 40 s;
+  the Wi-Fi driver's suspend path needs work before suspend is usable.
