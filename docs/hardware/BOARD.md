@@ -385,6 +385,16 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   measurement gave 45 mAh (about 133 mA, against 135 mA with the tick
   running), so the gain is correctness, not battery: the standby drain
   comes from the rest of the system, not from the CPUs' tick wakeups.
+- What the ~132 mA is not (15 min runs, cable out, 2026-11-16): the panel
+  (Omarchy's pre-suspend `omarchy-brightness-display off` already does
+  DPMS off plus `bl_power` 4; the DSI connector reads `Off`), the Wi-Fi
+  radio (`nmcli radio wifi off` for the suspend: 33 mAh in 901 s, about
+  132 mA), the CPU operating point (both clusters capped at their lowest
+  OPP, 500/774 MHz: 33 mAh in 901 s, about 132 mA). For comparison the
+  tablet awake, idle, screen off draws about 224 mA. The floor is the SoC
+  itself without the SPM's low-power modes (bus/DRAM/PLL states the vendor
+  suspend enters through SPM firmware); lowering it means understanding
+  the SPM, the same blocker as `deep` and the PSCI idle states.
 - Panel: s2idle leaves the panel lit unless the session powers its
   backlight down. Omarchy does it before suspend through `bl_power` of the
   first backlight, the panel's DSI one (DCS brightness, which the LM36274
