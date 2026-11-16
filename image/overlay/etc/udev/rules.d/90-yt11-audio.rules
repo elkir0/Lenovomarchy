@@ -1,0 +1,6 @@
+# Lenovo YT-J706F sound card ("mt6785mt6359"): point PipeWire's ALSA monitor
+# at our ACP profile set (Speaker / Headphones ports) instead of auto-profiling,
+# and give the playback front end a default route so the profile can be probed
+# (yt11-audio-defaults). Bare file name: looked up in
+# /usr/share/alsa-card-profile/mixer/profile-sets/.
+SUBSYSTEM=="sound", KERNEL=="card*", ATTR{id}=="mt6785mt6359", ENV{ACP_PROFILE_SET}="lenovo-yt-j706f.conf", RUN+="/usr/local/sbin/yt11-audio-defaults %n"

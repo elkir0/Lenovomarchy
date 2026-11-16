@@ -1,0 +1,12 @@
+#!/bin/sh
+# Run by udev when the YT-J706F sound card appears (90-yt11-audio.rules).
+#
+# The playback front end (DL1, PCM device 0) is a DPCM front end: opening it
+# fails with EINVAL while no back end is routed to it, so PipeWire's profile
+# probe would find no usable profile. Route DL1 to the MT6359 DAC (the
+# headphone path; nothing is audible while "HP Mux" stays open) so the PCM
+# can be opened; the PipeWire port paths then switch between the DAC and the
+# speaker amplifiers.
+card=${1:-0}
+amixer -q -c "$card" cset name='ADDA_DL_CH1 DL1_CH1' on
+amixer -q -c "$card" cset name='ADDA_DL_CH2 DL1_CH2' on
