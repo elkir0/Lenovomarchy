@@ -192,14 +192,23 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   vemc forced on. Something it needs at start-up (a clock, a supply or a
   pin the stock kernel sets) is still missing. The microphones do not work
   yet.
-- Clues for the next attempt: the second-stage loader does run. After the
-  ROM's `O`, a 16-byte read from sub-address 0 returns `0x80` in the word at
-  offset 4 (a 4-byte read at offset 4 returns 0), writes and reads at
-  offset 8 behave as plain memory, and writing message words at offset 0
-  makes it answer with error codes (`0x7e`, `0x7f`) in byte 0 without the
-  done bit. Its mailbox layout or handshake differs from what the vendor
-  loader's code suggests; disassembling the 8 KiB Thumb loader
-  (`iflash_boot2`) is the next step.
+- Second-stage findings (2026-11-16, from the image and the unit): the
+  8 KiB loader is a Cortex-M image in two segments, each behind a 0x18-byte
+  header (load address, length): 0xff0 bytes at 0x30019000 (vector table,
+  reset handler) and 0x710 bytes at 0x30019ff0. Its init points the I2C
+  slave window (registers at 0x42001400) at a RAM mailbox at 0x3001a69c and
+  writes 0x80 there; its loop waits for bit 7 of word 0 to clear, checks
+  the sequence byte and the hash in word 1, dispatches commands 8 (write a
+  4 KiB block) to 16 (14 sets the state that leaves the loop and jumps to
+  the firmware's vector table), others answer trivially, then sets bit 7.
+- On mainline the host sees that mailbox 4 bytes higher than the vendor
+  loader assumes: with every message moved to sub-address +4, ping and
+  status messages and all 158 block writes are acknowledged (4.7 s), but
+  the device only ever updates the done bit (reply words 1 and 2 keep what
+  the host wrote) and command 14 does not leave the loop: the firmware never
+  starts. The offset and the frozen reply words point at a different window
+  set-up than the stock kernel's, or at the ROM answering instead of the
+  loader; untangling it needs more disassembly of the loader's I2C path.
 
 ## Suspend (s2idle, 2026-11-16)
 
