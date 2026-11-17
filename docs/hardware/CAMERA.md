@@ -233,3 +233,32 @@ minutes on the eight cores) and installed:
   works regardless.
 - With the tablet standing in landscape the rear picture is upright as
   stored. The front picture's orientation is not judged yet.
+
+## libcamera auto-exposure (2026-11-17)
+
+- Two additions make the software ISP's exposure loop work. The sensor
+  drivers report their crop rectangles (`get_selection`: OV8856 active
+  area 3264x2448 at (16,16) in a 3296x2480 array, S5K4H7 3264x2448 at
+  (8,8), native size assumed 3280x2464), and
+  `libcamera-0.7.2-yt11-sensors.patch` gives libcamera a gain model
+  (OV8856 code/128, S5K4H7 code/32), a black level (64 at 10 bits) and
+  static properties for both sensors (package 0.7.2-4.2, built on the
+  tablet).
+- The crop, sensor helper, static properties and sensor delays warnings
+  are gone. What remains: no tuning file (`ov8856.yaml`, `s5k4h7.yaml`),
+  libcamera falls back to `uncalibrated.yaml`.
+- In the lit room the loop raises the exposure, then the gain, by at most
+  6 % per step: from the driver defaults it needs about 110 steps (some
+  15 s at 30 fps, 450 frames captured). Both cameras end at the maximum
+  exposure (2524 lines) and gain (16x); the mean of the RGB output goes
+  from about 30 to about 150 of 255. The result is on the bright side:
+  windows are blown out and colours are washed.
+- The sensor delays ({2, 2, 2, 2}) are copied from neighbouring entries,
+  not measured.
+- Camera numbers in `cam -l` are not stable: the back camera was 2 before
+  this rebuild and 1 after. Select a camera by its id string.
+- With the tablet as it stood for this test the front camera's picture
+  is upside down; the tablet's position was not checked, so the DT
+  `rotation` values stay unverified.
+- libcamera does not drive the focus actuator: the rear picture of a
+  close subject is blurred unless `focus_absolute` is set by hand.

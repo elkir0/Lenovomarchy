@@ -40,6 +40,25 @@ The patch was generated from the real v0.7.2 `simple.cpp` fetched from
 that URL and verified to apply with `patch -p1 --dry-run` against a
 pristine copy of the upstream file.
 
+### Sensor helpers and static properties (`libcamera-0.7.2-yt11-sensors.patch`)
+
+`libcamera-0.7.2-yt11-sensors.patch` adds support for the tablet's two
+10-bit sensors (`ov8856` rear, `s5k4h7` front) at tag `v0.7.2` so the
+software ISP's auto-exposure/gain loop and `CameraSensorLegacy` stop
+falling back to unscaled raw V4L2 gain codes and missing-property
+defaults:
+
+- `src/ipa/libipa/camera_sensor_helper.cpp`: adds
+  `CameraSensorHelperOv8856` (`blackLevel_ = 4096` for 64 at 10 bits,
+  `AnalogueGainLinear{ 1, 0, 0, 128 }` matching `OV8856_ANAL_GAIN_MIN`
+  = 128 / 1x) and `CameraSensorHelperS5k4h7` (`blackLevel_ = 4096`,
+  `AnalogueGainLinear{ 1, 0, 0, 32 }` matching `S5K4H7_AGAIN_MIN` = 32
+  / 1x).
+- `src/libcamera/sensor/camera_sensor_properties.cpp`: adds `ov8856` and
+  `s5k4h7` static property entries with `unitCellSize = { 1120, 1120 }`
+  nm, `testPatternModes` matching the kernel drivers'
+  `V4L2_CID_TEST_PATTERN` menus, and `sensorDelays` (`{ 2, 2, 2, 2 }`).
+
 ## Building on the tablet
 
 Copy this directory to the tablet (it has no other repo dependencies)
@@ -49,9 +68,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.1-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.1-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.1-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.2-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.2-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.2-aarch64.pkg.tar.xz
 ```
 
 Notes:

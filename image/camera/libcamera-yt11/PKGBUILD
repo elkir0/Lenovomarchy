@@ -4,8 +4,11 @@
 # (https://github.com/archlinuxarm/PKGBUILDs, extra/libcamera/PKGBUILD).
 # Differences from the ALARM package:
 #   - libcamera-0.7.2-simple-mt6785.patch adds this tablet's media device
-#     driver name ("mtk-mt6785-seninf") to the simple pipeline handler's
+#     driver name ("mt6785-cam") to the simple pipeline handler's
 #     supportedDevices[] table with the software ISP enabled.
+#   - libcamera-0.7.2-yt11-sensors.patch adds CameraSensorHelper and
+#     CameraSensorProperties entries for the tablet's ov8856 and s5k4h7
+#     sensors (gain model, black level, pixel size, test patterns, delays).
 #   - Only the simple pipeline and the soft IPA are built, and the heavy
 #     extras the tablet does not need (docs, GStreamer plugin, Python
 #     bindings, lc-compliance) are disabled so `makepkg -s` on the tablet
@@ -23,7 +26,7 @@ pkgname=(
   libcamera-tools
 )
 pkgver=0.7.2
-pkgrel=4.1
+pkgrel=4.2
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
 arch=(aarch64)
 url="https://libcamera.org/"
@@ -59,11 +62,14 @@ makedepends=(
 source=(
   "git+$_url#tag=v$pkgver"
   "$pkgbase-$pkgver-simple-mt6785.patch"
+  "$pkgbase-$pkgver-yt11-sensors.patch"
 )
 sha512sums=('SKIP'
-            '62fb7a6f50502e98ee2c5541ef1f4a04a713af3ed8eddf0d6b6471bf27146ef623f1fa3f0b9fa1b2c3ca08863c24eed9cebdbee089fb8c1fd1c681dec2d026ee')
+            '62fb7a6f50502e98ee2c5541ef1f4a04a713af3ed8eddf0d6b6471bf27146ef623f1fa3f0b9fa1b2c3ca08863c24eed9cebdbee089fb8c1fd1c681dec2d026ee'
+            '8c649c7b47508b15df394e0ed1f63ca5662c19045d059b76746786b9e76857f284a7d3a94f92f3c14942cbe6f2169f711e44f348e8602a0d615ef067a073a694')
 b2sums=('SKIP'
-        '73f3399218201a8ce0358b8bc58ffeff57a5010a3cb6a48aa21f1509b2642a621cbacabfb34939b048d97760cd26fcd64b390ad0d525e16c4f020aa63ae4c62f')
+        '73f3399218201a8ce0358b8bc58ffeff57a5010a3cb6a48aa21f1509b2642a621cbacabfb34939b048d97760cd26fcd64b390ad0d525e16c4f020aa63ae4c62f'
+        '9c57cd8ba76a5b761bfa0e1652ba2ccbac538b225affaa7ba323d81b23e5357d4b47a7e57027c671c470d38264363744ceeaf373844c9140ee10b853dc96f3fc')
 
 _pick() {
   local p="$1" f d; shift
@@ -78,6 +84,7 @@ _pick() {
 prepare() {
   cd $pkgbase
   patch -Np1 < ../$pkgbase-$pkgver-simple-mt6785.patch
+  patch -Np1 < ../$pkgbase-$pkgver-yt11-sensors.patch
 
   # add version, so that utils/gen-version.sh may rely on it
   printf "%s\n" "$pkgver" > .tarball-version

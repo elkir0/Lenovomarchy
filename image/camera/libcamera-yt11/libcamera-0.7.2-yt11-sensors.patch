@@ -1,0 +1,90 @@
+--- a/src/ipa/libipa/camera_sensor_helper.cpp	2026-11-17 06:39:52
++++ b/src/ipa/libipa/camera_sensor_helper.cpp	2026-11-17 06:40:16
+@@ -790,6 +790,18 @@
+ 	}
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("ov64a40", CameraSensorHelperOv64a40)
++
++class CameraSensorHelperOv8856 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperOv8856()
++	{
++		/* From Linux kernel driver: 0x40 at 10bits. */
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 128 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("ov8856", CameraSensorHelperOv8856)
+ 
+ class CameraSensorHelperOv8858 : public CameraSensorHelper
+ {
+@@ -827,6 +839,18 @@
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("ov13858", CameraSensorHelperOv13858)
+ 
++class CameraSensorHelperS5k4h7 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperS5k4h7()
++	{
++		/* 64 at 10bits. */
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("s5k4h7", CameraSensorHelperS5k4h7)
++
+ class CameraSensorHelperVd55g1 : public CameraSensorHelper
+ {
+ public:
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp	2026-11-17 06:39:52
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp	2026-11-17 06:40:20
+@@ -449,6 +449,25 @@
+ 		{ "ov7251", {
+ 			.unitCellSize = { 3000, 3000 },
+ 			.testPatternModes =  { },
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
++		{ "ov8856", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {
++				{ controls::draft::TestPatternModeOff, 0 },
++				{ controls::draft::TestPatternModeColorBars, 1 },
++				/*
++				 * No corresponding test pattern mode for:
++				 * 2: "Top-Bottom Darker Color Bar"
++				 * 3: "Right-Left Darker Color Bar"
++				 * 4: "Bottom-Top Darker Color Bar"
++				 */
++			},
+ 			.sensorDelays = {
+ 				.exposureDelay = 2,
+ 				.gainDelay = 2,
+@@ -503,6 +522,21 @@
+ 			},
+ 			.sensorDelays = { },
+ 		} },
++		{ "s5k4h7", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {
++				{ controls::draft::TestPatternModeOff, 0 },
++				{ controls::draft::TestPatternModeColorBars, 1 },
++				{ controls::draft::TestPatternModeSolidColor, 2 },
++				{ controls::draft::TestPatternModePn9, 3 },
++			},
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
+ 		{ "vd55g1", {
+ 			.unitCellSize = { 2160, 2160 },
+ 			.testPatternModes = {
