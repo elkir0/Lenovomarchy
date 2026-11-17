@@ -257,8 +257,11 @@ minutes on the eight cores) and installed:
   not measured.
 - Camera numbers in `cam -l` are not stable: the back camera was 2 before
   this rebuild and 1 after. Select a camera by its id string.
-- With the tablet as it stood for this test the front camera's picture
-  is upside down; the tablet's position was not checked, so the DT
-  `rotation` values stay unverified.
+- Mounting, checked with the tablet standing in landscape on its
+  kickstand (owner's confirmation): the rear sensor's picture is upright
+  as stored, the front sensor's is upside down. The DT now says
+  `rotation = <0>` (rear) and `<180>` (front). libcamera reports these
+  values and sets both flips on the S5K4H7 by itself: both pictures come
+  out upright.
 - libcamera does not drive the focus actuator: the rear picture of a
   close subject is blurred unless `focus_absolute` is set by hand.
