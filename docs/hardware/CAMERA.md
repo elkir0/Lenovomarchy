@@ -211,3 +211,25 @@ minutes on the eight cores) and installed:
 - libcamera warns that neither sensor driver implements the selection
   (crop) targets and that it has no tuning file or sensor helper for
   them: exposure and colour are uncalibrated defaults.
+
+## Lit-room tests and autofocus (2026-11-17, morning)
+
+- Both cameras show the room once exposure and gain are raised by hand
+  (`v4l2-capture.sh -e/-g`; OV8856 at 1200 to 2400 lines, S5K4H7 at its
+  maximum 626 lines and gain 512, in a dim room). Through libcamera the
+  same scene stays dark: without a sensor helper the software ISP does
+  not raise the exposure.
+- The autofocus actuator at 0x0c is a **DW9718S-compatible** part, not a
+  DW9714. With a close subject (about 40 cm) and the sharpness measure of
+  the earlier sweep: the DW9714 protocol leaves it at 9.3 over the whole
+  range again; writing the DW9718S registers by hand (0x00 = 0, 0x01 =
+  0x39, position in 0x02/0x03) gives 9.5 at 0, 11.6 at 260, 18.9 at 340,
+  14.1 at 380, 7.7 at 768 and above. The registers read back.
+- With the board DT node switched to `dongwoon,dw9718s` (mainline
+  `dw9719` driver, `vdd-supply` = vcamaf) the `focus_absolute` control
+  gives the same curve (18.6 at 340). A full-size photo at that position
+  is sharp: screen text is readable. The driver logs `Error writing reg
+  0x0000: -6` at each power-up (first write after the rail comes up) and
+  works regardless.
+- With the tablet standing in landscape the rear picture is upright as
+  stored. The front picture's orientation is not judged yet.
