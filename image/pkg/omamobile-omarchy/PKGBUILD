@@ -13,6 +13,10 @@
 # tablet's. See docs/research/omamobile/M1-OMARCHY-PATCHES.md for every
 # keep/drop decision and the upgrade plan.
 #
+# Built by image/tools/build-pkg whenever the archive of pkgver-pkgrel is
+# missing from the local [lenovomarchy] repo (image/build-rootfs.sh does this
+# automatically; the input/prebuilt/ archive of the 0.1.32 era is gone).
+#
 # Maintainer: Derek Ross <derek@ross.And> (upstream)
 # Tablet port: Lenovomarchy (image/pkg/omamobile-omarchy)
 pkgname=omamobile-omarchy

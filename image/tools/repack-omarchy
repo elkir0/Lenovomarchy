@@ -6,7 +6,9 @@
 #   1. Exact filename and SHA-256 digest checked against image/tools/repack.pins.
 #   2. Detached GPG signature (.sig) verified inside the container against
 #      omarchy-keyring, whose fingerprint must match image/tools/omarchy-trusted.fpr.
-#   3. verify-noarch packages are checked to contain no ELF binaries.
+#   3. verify-noarch packages are checked to contain no ELF binaries;
+#      verify-elf packages (which legitimately ship binaries, e.g.
+#      omarchy-speedtest) are checked to contain only 64-bit ARM aarch64 ELF.
 
 set -euo pipefail
 
@@ -83,7 +85,7 @@ kr_sha="$(pin_lookup omarchy-keyring 3)"
 [[ -n "$kr_file" && -n "$kr_sha" ]] || die "omarchy-keyring must be pinned in $PINS_FILE"
 fetch_pinned "omarchy-keyring" "$kr_file" "$kr_sha"
 
-while read -r pkg mode _; do
+while read -r pkg _mode _; do  # _mode: used by the container loop below
     [[ -z "${pkg:-}" || "$pkg" =~ ^# ]] && continue
     fn="$(pin_lookup "$pkg" 2)"
     sha="$(pin_lookup "$pkg" 3)"
@@ -160,6 +162,27 @@ docker run --rm --platform linux/arm64 \
                     if [[ -n "$elf_hits" ]]; then
                         echo "ERROR: $pkg ($fname) is marked verify-noarch but contains ELF binaries:" >&2
                         echo "$elf_hits" >&2
+                        exit 1
+                    fi
+                    cp -f "$src" "/out/$fname"
+                    ;;
+
+                verify-elf)
+                    # A package that legitimately ships binaries: after the
+                    # SHA-256 + GPG checks above, require every ELF to be
+                    # 64-bit ARM aarch64 before publishing it.
+                    parch="$(bsdtar -xOf "$src" .PKGINFO | awk -F" = " "\$1==\"arch\"{print \$2; exit}")"
+                    if [[ "$parch" != "aarch64" ]]; then
+                        echo "ERROR: $pkg expected arch=aarch64, got arch=$parch" >&2
+                        exit 1
+                    fi
+                    work="$(mktemp -d)"
+                    bsdtar -xf "$src" -C "$work"
+                    bad_elf="$(find "$work" -type f -exec file -b {} + | grep -F "ELF " | grep -vF "ELF 64-bit LSB" || true)"
+                    non_arm="$(find "$work" -type f -exec file -b {} + | grep -F "ELF " | grep -vcF "ARM aarch64" || true)"
+                    rm -rf "$work"
+                    if [[ -n "$bad_elf" || "$non_arm" != "0" ]]; then
+                        echo "ERROR: $pkg ($fname) is marked verify-elf but contains non-aarch64 or non-64-bit ELF binaries" >&2
                         exit 1
                     fi
                     cp -f "$src" "/out/$fname"

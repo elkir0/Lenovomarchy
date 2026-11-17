@@ -7,8 +7,9 @@
 # signed by the key in omarchy-trusted.fpr. Both the SHA-256 pin AND the GPG
 # signature are verified by repack-omarchy before any archive is unpacked.
 
-omarchy                        omarchy-4.0.6-1-aarch64.pkg.tar.zst                        27cd6d88fda0be6c269c14dd65dad6a014384fedc3ea4eb5c742b2b972b10494
-omarchy-settings               omarchy-settings-4.0.6-1-aarch64.pkg.tar.zst               f653d97a7832eaa6b71dae1a6ce0480cb2631d6ca9a3350534a579cb08c6b309
+omarchy                        omarchy-4.5.0-3-aarch64.pkg.tar.zst                        d367067c1e35d6e99f7cd921e0a55ec6e46cb0d2bc681b1a4b39254c8c0416e7
+omarchy-settings               omarchy-settings-4.5.0-3-aarch64.pkg.tar.zst               2a81decbaeb873a354f2b9728cd0dfc8b633af101eed98e3945e2b6bf55c8c58
+omarchy-speedtest              omarchy-speedtest-0.2.1-1-aarch64.pkg.tar.zst              0fe8413b0da314035fd68aee697b6d4b7e50cde5f2413920351be63719aafb7c
 omarchy-keyring                omarchy-keyring-20251027-1-any.pkg.tar.zst                 cce48c07cfc2b97e198df1bc81705db2921685032fe39f18b4ddfd84264b5967
 omarchy-themes-intros          omarchy-themes-intros-2026.10.14-1-any.pkg.tar.zst         d748591bc725de043f6ce1895b1015af3085037ab4e5f1af58f039305e1d5d9a
 omarchy-nvim                   omarchy-nvim-2026.9.21-5-any.pkg.tar.zst                   b46d41973cacfcf2d8be371351336a3f689e2eb7b9bacdb7ca81939354cbcbc9

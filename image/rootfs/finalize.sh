@@ -15,8 +15,30 @@ sed -i '/^\[lenovomarchy\]/,/^Server = /d' /etc/pacman.conf
 
 # Hold custom/repacked packages so 'pacman -Syu' on the device does not
 # replace them prematurely.
+#   - omarchy/omarchy-settings/omarchy-keyring: repacked from pkgs.omarchy.org
+#     into [lenovomarchy] at build time; there is no [omarchy] repo configured
+#     on the tablet, so an update must never try to satisfy them from ALARM.
+#   - omamobile-omarchy, omamobile-shell, omacam, omamobile-settings,
+#     omamobile-remote, wlrctl: the tablet's own builds / verified repacks;
+#     there is no [omamobile] repo configured either.
+#   - omarchy-speedtest: repacked dependency of omarchy 4.5.
+#   - libcamera, libcamera-ipa, libcamera-tools: the tablet's own build from
+#     image/camera/libcamera-yt11 (simple pipeline + soft ISP + sensors/AE/AF
+#     patches). Chosen over a higher pkgrel: a pkgrel race against ALARM's
+#     0.7.2-4 would need the tablet's build to track every ALARM bump, and
+#     pacman replaces on version, so an ALARM 0.7.2-5 would win again;
+#     IgnorePkg says what we mean (this machine's camera stack is pinned) and
+#     survives repo-side version churn. omacam depends on 'libcamera>=0.7
+#     <0.8', satisfied by the held 0.7.2-4.5.
 grep -q '^IgnorePkg' /etc/pacman.conf || \
-    sed -i '/^\[options\]/a IgnorePkg = hyprland omarchy omarchy-settings omarchy-keyring omamobile-omarchy omamobile-shell' /etc/pacman.conf
+    sed -i '/^\[options\]/a IgnorePkg = hyprland omarchy omarchy-settings omarchy-keyring omarchy-speedtest omamobile-omarchy omamobile-shell omacam omamobile-settings omamobile-remote wlrctl libcamera libcamera-ipa libcamera-tools' /etc/pacman.conf
+
+# Hold list for Omarchy 4.5's migrations (consumed by
+# /usr/local/bin/yt11-omarchy-migrations-hold; the image marks every shipped
+# migration done already, and the list documents which ones must never run,
+# for the user and for future in-place Omarchy upgrades).
+install -Dm644 /tmp/build/omarchy-migrations.hold \
+    /usr/share/lenovomarchy/omarchy-migrations.hold
 
 echo "==> [finalize] Cleaning pacman package cache, temporary files, and SSH/GPG private keys"
 rm -rf /var/cache/pacman/pkg/*

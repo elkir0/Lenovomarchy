@@ -1,5 +1,8 @@
-# Dependencies of `omarchy` (4.0.6) intentionally skipped on the Lenovo Yoga Tab 11 (aarch64).
-# Each entry is either x86-only, AUR-only without an ALARM package, or redundant on this tablet.
+# Dependencies of `omarchy` and entries of its 4.5 package lists
+# (/usr/share/omarchy/install/omarchy-base.packages + omarchy-aarch64.packages)
+# intentionally skipped on the Lenovo Yoga Tab 11 (aarch64).
+# Each entry is x86-only, AUR/[omarchy]-repo-only without an ALARM package,
+# or unusable/redundant on this tablet.
 
 # --- Bootloader & disk encryption / Btrfs snapshot stack (Android LK bootloader + ext4 userdata) ---
 limine
@@ -77,7 +80,55 @@ kvantum-qt5
 fcitx5
 fcitx5-gtk
 fcitx5-qt
+fcitx5-chewing
+fcitx5-chinese-addons
+fcitx5-hangul
+fcitx5-mozc
+fcitx5-table-extra
 python-terminaltexteffects
+
+# --- New in Omarchy 4.5's lists, skipped on this tablet ---
+# Base-devel + full Qt6 dev stack: a compiler toolchain nobody uses on a touch
+# tablet (~hundreds of MB; M3 holds migration 1790702362 for the same reason).
+base-devel
+# Qt6 libraries: nothing the image installs needs the full module set
+# (multimedia, svg, wayland); qt6-declarative arrives as a dependency of the
+# omamobile shell and omamobile-settings. Revisit when an app needs one.
+qt6-base
+qt6-multimedia
+qt6-svg
+qt6-wayland
+# Published only on pkgs.omarchy.org, which this image's pacman cannot see
+# (its repositories are [core]/[extra]/[alarm] + the local [lenovomarchy]);
+# Omarchy Mobile holds the same migrations on phones. aether (Elsewhen's
+# world clock) is here too: it belongs on Omarchy's own bar, and the tablet
+# runs the omamobile bar (M3 holds migration 1790042972 likewise).
+monologue
+hype
+signed
+owe
+gliff
+disktree-bin
+omacalc
+omacut
+omawrite
+aether
+# Omarchy's own power-profiles-daemon build (CPPC): pkgs.omarchy.org only, and
+# MT6785's cpufreq is cpufreq-dt, not cppc_cpufreq (M3 1791554699). The
+# omamobile battery-saver tile degrades without any ppd; install ALARM's
+# stock power-profiles-daemon if it is ever wanted.
+omarchy-power-profiles-daemon
+# Omarchy's Hyprland titlebars: pkgs.omarchy.org only, pinned to Omarchy's own
+# Hyprland build (the tablet runs ALARM's 0.57).
+omarchy-hyprland-titlebars
+# Cloud dictation model: x86 + [omarchy]-only, and the tablet's microphones
+# are blocked anyway.
+superwhisper-bin
+# Terminal agent CLIs not in ALARM ([omarchy]/AUR only).
+cliamp
+herdr
+ttfx
+mise-bin
 
 # --- Conflicts with NetworkManager ---
 iwd

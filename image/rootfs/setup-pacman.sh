@@ -26,12 +26,15 @@ if [[ ! -f /tmp/build/repo/lenovomarchy.db.tar.gz ]]; then
 fi
 
 if ! grep -q '^\[lenovomarchy\]' /etc/pacman.conf; then
-    cat >> /etc/pacman.conf <<'EOF'
-
-[lenovomarchy]
-SigLevel = Optional TrustAll
-Server = file:///tmp/build/repo
-EOF
+    # The local repo must come BEFORE [core]/[extra]/[alarm]: this pacman
+    # resolves a name offered by several repositories by repository order
+    # first, so an appended entry would let Arch Linux ARM's libcamera 0.7.2-4
+    # shadow the tablet's 0.7.2-4.5 despite the higher version.
+    sed -i '/^\[core\]/i\
+[lenovomarchy]\
+SigLevel = Optional TrustAll\
+Server = file:///tmp/build/repo\
+' /etc/pacman.conf
 fi
 
 echo "==> [setup-pacman] Initializing pacman keyring"

@@ -1,0 +1,16 @@
+# Packages fetched from https://pkgs.omamobile.org/stable/aarch64/ and
+# published into the local [lenovomarchy] pacman repository (aarch64).
+#
+# Format: <pkgname> <mode>
+#   copy-any       : upstream pkg already has arch=any; copy after SHA-256 + GPG check
+#   copy-elf       : upstream pkg is tagged arch=aarch64 (it may contain ELF
+#                    binaries); copy after SHA-256 + GPG check. The signature
+#                    check is the trust boundary here: the key's fingerprint
+#                    must match tools/omamobile-trusted.fpr, and the signing
+#                    subkey's fingerprint is accepted alongside the primary's
+#                    (the release key certifies only; a subkey signs).
+
+omamobile-remote     copy-any
+omacam               copy-elf
+omamobile-settings   copy-elf
+wlrctl               copy-elf

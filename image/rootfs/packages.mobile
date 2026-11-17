@@ -1,5 +1,10 @@
 # Touch & tablet shell packages installed by install-mobile.sh on top of the
-# Omarchy desktop layer.
+# Omarchy desktop layer. The [lenovomarchy] repo holds: the two tablet-built
+# omamobile packages, the repacked Omarchy Mobile binaries (omacam,
+# omamobile-settings, omamobile-remote, wlrctl — all sha256 + GPG verified by
+# image/tools/repack-omamobile) and the tablet's own libcamera (from
+# image/camera/libcamera-yt11). The gst/pipewire bits are omacam's camera
+# plumbing from Arch Linux ARM.
 
 # --- On-screen keyboard (Wayland input-method-v2 + text-input-v3) ---
 squeekboard
@@ -7,3 +12,15 @@ squeekboard
 # --- Omarchy Mobile touch adaptations & Quickshell plugins (from [lenovomarchy]) ---
 omamobile-omarchy
 omamobile-shell
+
+# --- Camera: Omarchy Mobile's camera app + its GStreamer/PipeWire plumbing ---
+omacam
+gst-plugins-good
+gst-plugins-ugly
+gst-plugin-pipewire
+pipewire-libcamera
+
+# --- Omarchy Mobile extras (repacked, verified) ---
+omamobile-settings
+omamobile-remote
+wlrctl

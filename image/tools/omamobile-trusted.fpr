@@ -1,0 +1,12 @@
+# Trusted OpenPGP fingerprints for https://pkgs.omamobile.org/
+# (Omarchy Mobile, extracted from the omamobile-keyring package the repo
+# publishes). Signatures are made by the release key's signing SUBKEY, so
+# the fingerprint check accepts the subkey's fingerprint as well as the
+# primary's: see the key package's README (packages/omamobile-keyring).
+#
+# primary "Omarchy Mobile Package Signing" (2026-10-12, signs keyring pkg)
+6C84FE3D240709E70E27CC94B301F5EA62B249FE
+# primary "Omarchy Mobile Release Key" (2026-10-26, certifies only)
+20567593566EEEE2DD8864608632C8075EB94673
+# its ed25519 signing subkey (the one that actually makes the .sig files)
+DDBA4581E0178D33DB69973F7F1041BF47291504

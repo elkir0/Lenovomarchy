@@ -50,7 +50,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
 
 --- a/bin/omamobile-setup-user
 +++ b/bin/omamobile-setup-user
-@@ -70,7 +70,73 @@
+@@ -70,7 +70,76 @@
      os.replace(path + ".new", path)
  PY
  }
@@ -98,7 +98,10 @@ packages/omamobile-shell, on top of 0001 to 0003.
 +      removed=$((removed + 1))
 +    fi
 +  done
-+  ((removed)) && echo "omamobile-setup-user: removed $removed stale plugin link(s) this build does not ship"
++  if ((removed)); then
++    echo "omamobile-setup-user: removed $removed stale plugin link(s) this build does not ship"
++  fi
++  return 0
 +}
 +# The phone build's menu rows, removed from an existing extension file the
 +# same way: each was seeded as one line naming its plugin, and the plugins
@@ -125,7 +128,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
    add_plugin omamobile.fingerprint
  fi
  if omarchy-done ensure omamobile-keyboard-plugin; then
-@@ -282,11 +348,13 @@
+@@ -282,11 +351,13 @@
    fi
  fi
  
@@ -143,7 +146,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
  fi
  
  # Phone window and layer rules (apps fill the screen instead of floating at
-@@ -338,6 +406,13 @@
+@@ -338,6 +409,13 @@
     omarchy-done ensure omamobile-auto-sleep-on; then
    mkdir -p ~/.local/state/omarchy/toggles
    touch ~/.local/state/omarchy/toggles/omamobile-sleep
@@ -157,7 +160,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
  fi
  
  # Lock screen: Omarchy's lock with a number pad (lock-keypad toggle, see
-@@ -416,7 +491,8 @@
+@@ -416,7 +494,8 @@
  # libfprint-git. On the phone it opens Omarchy Mobile's enrollment screen instead
  # (omamobile.fingerprint, through fprintd), once, through the same menu
  # extension file (a reused id replaces the entry).
@@ -167,7 +170,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
    extension=~/.config/omarchy/extensions/omarchy-menu.jsonc
    mkdir -p "$(dirname "$extension")"
    [[ -s $extension ]] || printf '{\n}\n' >"$extension"
-@@ -474,18 +550,21 @@
+@@ -474,18 +553,21 @@
  # extension file. Update > Firmware (fwupd) and Update > Config > Plymouth
  # (an initramfs rebuild) are hidden: the phone boots from boot_b, which
  # bin/omamobile push writes, and its firmware is Google's.
@@ -192,7 +195,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
    add_plugin omamobile.call
  fi
  # The back gesture (omamobile.back): swipe in from a side edge for Escape.
-@@ -495,16 +574,19 @@
+@@ -495,16 +577,19 @@
  # Voice input (omamobile.voice): hold the home pill to ask the agent, the
  # keyboard strip's mic key to dictate, through Voxtype (in the root image,
  # set up below; or Install > AI > Dictation); without it the sheet says so.
@@ -215,7 +218,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
    extension=~/.config/omarchy/extensions/omarchy-menu.jsonc
    if [[ -f $extension ]] && ! grep -q '"setup.mobile-network"' "$extension"; then
      sed -i '0,/^{/s//{\n  "setup.mobile-network": {"icon":"\xf3\xb0\x9e\x83","label":"Mobile network","description":"Carrier, mobile data, roaming and the APN","when":"test -x \/usr\/lib\/omamobile-sit\/omamobile-sit-config","action":"omarchy-shell shell summon omamobile.mobilenetwork '"'"'{}'"'"'"},/' "$extension"
-@@ -512,7 +594,8 @@
+@@ -512,7 +597,8 @@
  fi
  # Setup > Voice in Omarchy's menu opens the voice settings (omamobile.voice),
  # through the menu extension file. Added once.
@@ -225,7 +228,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
    extension=~/.config/omarchy/extensions/omarchy-menu.jsonc
    if [[ -f $extension ]] && ! grep -q '"setup.voice"' "$extension"; then
      sed -i '0,/^{/s//{\n  "setup.voice": {"icon":"\xf3\xb0\x8d\xac","label":"Voice","description":"Speech model and how voice input starts","action":"omarchy-shell shell summon omamobile.voice '"'"'{\\"page\\":\\"settings\\"}'"'"'"},/' "$extension"
-@@ -622,13 +705,14 @@
+@@ -622,13 +708,14 @@
      systemctl --user try-restart voxtype.service || true
    fi
  fi
@@ -247,7 +250,7 @@ packages/omamobile-shell, on top of 0001 to 0003.
  fi
  
  # Menu rows that break the phone or can't work on it (TOUCH-PLAN 0.2, 0.3,
-@@ -686,6 +770,9 @@
+@@ -686,6 +773,9 @@
    appearance.dock appearance.dock.always-on appearance.dock.autohide appearance.dock.position \
    appearance.dock.position.bottom appearance.dock.position.left appearance.dock.position.right appearance.dock.position.top \
    update.kernel

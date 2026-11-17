@@ -2,10 +2,13 @@
 # omamobile-shell (image/pkg/omamobile-shell).
 #
 # Upstream: https://github.com/derekross/omarchy-mobile,
-# packages/omamobile-shell 0.2.133 (targets Omarchy 4.5.0-3; here it runs
-# against Omarchy 4.0.6, the version this image repacks — the shell kept its
-# 4.0 code paths: both dnd reads, both notification stores). Pinned at commit
+# packages/omamobile-shell 0.2.133 (targets Omarchy 4.5.0-3, which is what
+# this image repacks since M4; the shell keeps its 4.0 code paths too: both
+# dnd reads, both notification stores). Pinned at commit
 # c4623572be1c141d602cf99a83ae0bf9e3eea09c, tarball checked by sha256.
+# Built by image/tools/build-pkg whenever the archive of pkgver-pkgrel is
+# missing from the local [lenovomarchy] repo (image/build-rootfs.sh does this
+# automatically; there is no input/prebuilt/ archive anymore).
 #
 # What it is: ordinary Omarchy shell plugins (QML) that turn Omarchy's shell
 # into a touch shell: a status bar with a pull-down quick-settings sheet
@@ -92,7 +95,7 @@
 # branding/, the widget guides and examples, the polkit admin rule,
 # omamobile-setup-user.service (the image masks it after --adopt).
 #
-# Depends on Omarchy (4.0.6 from the local [lenovomarchy] repo) for the host
+# Depends on Omarchy (4.5.0-3 from the local [lenovomarchy] repo) for the host
 # shell: omarchy-shell, omarchy-done, omarchy-menu, omarchy-toggle*,
 # omarchy-capture-screenshot, omarchy-notification-send, omarchy-theme-*,
 # omarchy-launch-floating-terminal-with-presentation, omarchy-agent-prompt,
@@ -104,7 +107,7 @@
 
 pkgname=omamobile-shell
 pkgver=0.2.133
-pkgrel=2
+pkgrel=3
 pkgdesc="Omarchy Mobile's touch shell for Omarchy: status bar, quick settings, launcher, recents, home, back swipe (YT-J706F Wi-Fi tablet build)"
 arch=(any)
 url="https://github.com/derekross/omarchy-mobile"

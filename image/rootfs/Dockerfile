@@ -36,10 +36,9 @@ RUN chmod +x /tmp/build/*.sh && \
 
 COPY packages.mobile        /tmp/build/packages.mobile
 COPY tablet.lua             /tmp/build/tablet.lua
-COPY tablet-shell.json      /tmp/build/tablet-shell.json
-COPY tablet-home.json       /tmp/build/tablet-home.json
 COPY wallpapers.sh          /tmp/build/wallpapers.sh
 COPY install-mobile.sh      /tmp/build/install-mobile.sh
+COPY omarchy-migrations.hold /tmp/build/omarchy-migrations.hold
 COPY smoke-check.sh         /tmp/build/smoke-check.sh
 COPY finalize.sh            /tmp/build/finalize.sh
 

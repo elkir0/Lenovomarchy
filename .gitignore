@@ -10,5 +10,5 @@
 /.fleet-runs/
 *.zip
 /reference/
-/input/
+/input
 __pycache__/

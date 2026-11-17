@@ -3,6 +3,7 @@
 #   - squeekboard on-screen keyboard
 #   - omamobile-omarchy patches over /usr/share/omarchy
 #   - omamobile-shell Quickshell plugins + omamobile-setup-user --adopt for alarm
+#   - Omarchy Mobile extras (omacam camera app, settings, remote test tools)
 #   - tablet.lua appended to hyprland.lua, verified with Hyprland --verify-config
 #   - theme wallpapers downscaled to <= 2000 px
 
@@ -18,35 +19,49 @@ GRAPH_WANTS="$HOME_DIR/.config/systemd/user/graphical-session.target.wants"
 
 echo "==> [install-mobile] Installing packages from packages.mobile"
 mapfile -t MOBILE_PKGS < <(grep -vE '^\s*(#|$)' "$MOBILE_FILE" | awk '{print $1}')
-# The prebuilt omamobile-shell archive from the sister project declares
-# depend = omatel-agent>=0.2.1 (for the SM-T715 modem); YT-J706F is Wi-Fi-only
-# and disables callWatch/cellWatch in shell.json, so satisfy that virtual
-# dependency with --assume-installed while resolving all real ALARM dependencies.
-pacman -S --noconfirm --needed --assume-installed omatel-agent=0.2.1 "${MOBILE_PKGS[@]}"
+pacman -S --noconfirm --needed "${MOBILE_PKGS[@]}"
 
-for bin in squeekboard omamobile-omarchy-patches omamobile-setup-user; do
+for bin in squeekboard omamobile-omarchy-patches omamobile-setup-user omacam; do
     command -v "$bin" >/dev/null 2>&1 || {
         echo "ERROR: '$bin' not on PATH after packages.mobile install" >&2
         exit 1
     }
 done
 
+# The 0.1.48 package has no omatel-agent dependency, so the old
+# --assume-installed omatel-agent workaround is gone.
+
 echo "==> [install-mobile] Applying and verifying omamobile-omarchy patch series"
+# Docker's overlayfs makes os.rename() of a directory created in an earlier
+# RUN layer fail with EXDEV (the pacman hook already applied the series when
+# install-packages.sh installed omarchy, leaving
+# /var/lib/omamobile/omarchy-patches/pristine in a lower layer). Copy the
+# state tree in place first — same trick as out/rehearsal/step.sh — so the
+# tool's directory swaps stay inside this layer. Verification still runs.
+for d in /var/lib/omamobile /usr/share/omarchy; do
+    if [[ -d "$d" ]]; then
+        cp -a "$d" "$d.omamobile-copy"
+        rm -rf "$d"
+        mv "$d.omamobile-copy" "$d"
+    fi
+done
 omamobile-omarchy-patches apply
 omamobile-omarchy-patches verify
 /usr/lib/omamobile-omarchy/lock-pam
 test -f /etc/pam.d/omarchy-lock-password
 
-echo "==> [install-mobile] Installing Wi-Fi tablet shell.json and home.json profiles"
-cp -f "$BUILD_DIR/tablet-shell.json" /usr/share/omamobile/shell/profile/shell.json
-cp -f "$BUILD_DIR/tablet-home.json" /usr/share/omamobile/shell/profile/home.json
-
 echo "==> [install-mobile] Running omamobile-setup-user --adopt for $USER_NAME"
+# The omamobile-shell package ships the tablet profiles itself
+# (/usr/share/omamobile/shell/profile/shell.json is tablet-shell.json and
+# profile/home.json is tablet-home.json from its PKGBUILD). With --adopt the
+# profile-seeding step is marked done WITHOUT running, so the image seeds the
+# user's copies itself, exactly from the package's profiles:
 su - "$USER_NAME" -c 'omamobile-setup-user --adopt'
 cp -f /usr/share/omamobile/shell/profile/shell.json "$HOME_DIR/.config/omarchy/shell.json"
 mkdir -p "$HOME_DIR/.config/omamobile"
 cp -f /usr/share/omamobile/shell/profile/home.json "$HOME_DIR/.config/omamobile/home.json"
-cp -f /usr/share/omamobile/shell/profile/home.json "$HOME_DIR/.config/omarchy/home.json"
+chown "$USER_NAME:$USER_NAME" "$HOME_DIR/.config/omarchy/shell.json" \
+    "$HOME_DIR/.config/omamobile/home.json"
 
 # Configure squeekboard dconf settings and terminal keyboard layouts with Esc
 su - "$USER_NAME" -c '
@@ -98,6 +113,11 @@ test -f "$HOME_DIR/.config/omarchy/shell.json"
 test -L "$HOME_DIR/.config/omarchy/plugins/omamobile.bar"
 test -f "$HOME_DIR/.local/state/omarchy/toggles/stay-awake"
 
+# A migration that seeds a wants link for omarchy-fcitx5.service (a unit the
+# image does not install; fcitx5 is skipped for squeekboard) would leave a
+# dangling link the user manager complains about at login: pre-remove it.
+rm -f "$HOME_DIR/.config/systemd/user/graphical-session.target.wants/omarchy-fcitx5.service"
+
 echo "==> [install-mobile] Appending tablet.lua to hyprland.lua"
 for cfg in "$HOME_DIR/.config/hypr/hyprland.lua" /etc/skel/.config/hypr/hyprland.lua; do
     if ! grep -q "Lenovo Yoga Tab 11 (YT-J706F) tablet layer" "$cfg"; then
@@ -124,7 +144,15 @@ chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR"
 echo "==> [install-mobile] Verifying $HOME_DIR/.config/hypr/hyprland.lua with Hyprland --verify-config"
 VERIFY_RUN="$(mktemp -d)"
 chmod 0700 "$VERIFY_RUN"
-chown "$USER_NAME:$USER_NAME" "$VERIFY_RUN"
+# Omarchy 4.5's startup-cursor.lua needs two things outside a real session:
+# HYPRLAND_INSTANCE_SIGNATURE (nil is a Lua error) and no hl.timer() call,
+# which makes Hyprland 0.57.2 segfault in --verify-config mode (no event
+# loop). The wrapper stubs the timer, then loads the user's config.
+cat > "$VERIFY_RUN/verify.lua" <<EOF
+hl.timer = function() end
+dofile("$HOME_DIR/.config/hypr/hyprland.lua")
+EOF
+chown -R "$USER_NAME:$USER_NAME" "$VERIFY_RUN"
 runuser -u "$USER_NAME" -- env -i \
     PATH="/usr/share/omarchy/bin:/usr/local/bin:/usr/bin" \
     HOME="$HOME_DIR" \
@@ -132,7 +160,8 @@ runuser -u "$USER_NAME" -- env -i \
     XDG_RUNTIME_DIR="$VERIFY_RUN" \
     OMARCHY_PATH="/usr/share/omarchy" \
     LANG="C.UTF-8" \
-    Hyprland --verify-config --config "$HOME_DIR/.config/hypr/hyprland.lua"
+    HYPRLAND_INSTANCE_SIGNATURE="verify" \
+    Hyprland --verify-config --config "$VERIFY_RUN/verify.lua"
 rm -rf "$VERIFY_RUN"
 
 echo "==> [install-mobile] Done"

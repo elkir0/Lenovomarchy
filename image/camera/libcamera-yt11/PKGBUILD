@@ -3,6 +3,10 @@
 # Based on the Arch Linux ARM PKGBUILD for libcamera 0.7.2-4
 # (https://github.com/archlinuxarm/PKGBUILDs, extra/libcamera/PKGBUILD).
 # Differences from the ALARM package:
+#   - build-time dependencies renamed to what Arch Linux ARM's aarch64
+#     repositories actually carry: python-yaml (not python-pyyaml) and
+#     sdl2-compat (which provides sdl2; no plain sdl2 package exists there),
+#     and libunwind added to makedepends (meson requires it).
 #   - libcamera-0.7.2-simple-mt6785.patch adds this tablet's media device
 #     driver name ("mt6785-cam") to the simple pipeline handler's
 #     supportedDevices[] table with the software ISP enabled.
@@ -23,8 +27,12 @@
 #   - The ALARM libpisp make-dependency and its -D rpi-awb-nn override are
 #     dropped along with the rpi pipelines: no Raspberry Pi is involved.
 #   - arch is aarch64 and the test suite (needs CLONE_NEWUSER/CLONE_NEWNET
-#     in the build chroot) is skipped, as building happens directly on
-#     the tablet.
+#     in the build chroot) is skipped: building happens directly on the
+#     tablet or, since M4, in the image build's arm64 Docker container
+#     (image/tools/build-pkg --src image/camera/libcamera-yt11, with
+#     --nocheck), and the image installs the three packages in place of
+#     Arch Linux ARM's libcamera, held by IgnorePkg so a plain
+#     'pacman -Syu' cannot replace them.
 
 pkgbase=libcamera
 pkgname=(
@@ -55,15 +63,16 @@ makedepends=(
   libjpeg-turbo
   libstdc++
   libtiff
+  libunwind
   libyaml
   libyuv
   meson
   python-jinja
   python-ply
-  python-pyyaml
+  python-yaml
   qt6-base
   qt6-tools
-  sdl2
+  sdl2-compat
   systemd
 )
 source=(
@@ -201,7 +210,7 @@ package_libcamera-tools() {
     libtiff libtiff.so
     libyaml
     qt6-base
-    sdl2
+    sdl2-compat   # provides sdl2 (Arch Linux ARM has no plain sdl2)
   )
 
   mv -v $pkgname/* "$pkgdir"

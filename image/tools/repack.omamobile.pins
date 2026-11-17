@@ -1,0 +1,17 @@
+# Pinned upstream package filenames and SHA-256 digests from
+# https://pkgs.omamobile.org/stable/aarch64/ (verified against
+# omamobile-trusted.fpr through the keyring package it publishes).
+#
+# Format: <pkgname> <filename> <sha256>
+#
+# The SHA-256 digests of everything except omacam were taken from the signed
+# repository index omamobile.db (checked with the repack tool itself); omacam's
+# was given by the brief and matches the index. Every file listed here also has
+# a detached GPG signature (<filename>.sig) made by the release key's signing
+# subkey. Both the SHA-256 pin AND the GPG signature are verified by
+# repack-omamobile before any archive is unpacked.
+
+omacam               omacam-0.3.3-1-aarch64.pkg.tar.zst               e65a90f72172f1952b880bc08715c18fbf21ca1f4d25492da7c6272d320cd60b
+omamobile-settings   omamobile-settings-0.1.2-1-aarch64.pkg.tar.zst  0fef7c41696c1f7c74c6fc120cf49da7c95db8cd903b41544b5da49c2da6865e
+omamobile-remote     omamobile-remote-0.1.2-1-any.pkg.tar.zst        08874d7b7053728c6dc6383f820aeb6dc5673ae30b15b86a01c3254867238ae8
+wlrctl               wlrctl-0.2.2-1-aarch64.pkg.tar.zst             ed897fd2c06de4e66b91d8e96c8c78f03bdc5fb57b301df380e77f242cbefb09

@@ -42,13 +42,14 @@ if [[ -d "$OMARCHY_PATH/themes/tokyo-night" ]]; then
 fi
 
 if [[ -d "$HOME_DIR/.config/omarchy/current/theme" ]]; then
-    mkdir -p "$HOME_DIR/.config/btop/themes" "$HOME_DIR/.config/mako" "$HOME_DIR/.config/eza"
+    mkdir -p "$HOME_DIR/.config/btop/themes" "$HOME_DIR/.config/eza"
     [[ -f "$HOME_DIR/.config/omarchy/current/theme/btop.theme" ]] && \
         ln -sf "$HOME_DIR/.config/omarchy/current/theme/btop.theme" "$HOME_DIR/.config/btop/themes/current.theme"
-    [[ -f "$HOME_DIR/.config/omarchy/current/theme/mako.ini" ]] && \
-        ln -sf "$HOME_DIR/.config/omarchy/current/theme/mako.ini" "$HOME_DIR/.config/mako/config"
     [[ -f "$HOME_DIR/.config/omarchy/current/theme/eza.yml" ]] && \
         ln -sf "$HOME_DIR/.config/omarchy/current/theme/eza.yml" "$HOME_DIR/.config/eza/theme.yml"
+    # No mako config link: Omarchy 4.5's shell is the notification server and
+    # mako is no longer installed (it stole org.freedesktop.Notifications at
+    # boot via D-Bus activation). The 4.5 themes ship no mako.ini anyway.
 fi
 
 echo "==> [omarchy-user-setup] Applying Hyprland tablet overrides (scale 1.5, transform 2, no blur/shadow)"
@@ -84,9 +85,9 @@ done
 mkdir -p "$HOME_DIR/.local/state/omarchy"
 if [[ -d "$OMARCHY_PATH/.git" ]]; then
     git -C "$OMARCHY_PATH" describe --tags --abbrev=0 > "$HOME_DIR/.local/state/omarchy/version" 2>/dev/null || \
-        echo "4.0.6" > "$HOME_DIR/.local/state/omarchy/version"
+        echo "4.5.0" > "$HOME_DIR/.local/state/omarchy/version"
 else
-    echo "4.0.6" > "$HOME_DIR/.local/state/omarchy/version"
+    echo "4.5.0" > "$HOME_DIR/.local/state/omarchy/version"
 fi
 
 # A fresh install already holds the end state of every shipped migration.

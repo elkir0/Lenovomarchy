@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# Fetch, verify, and publish upstream Omarchy Mobile packages from
+# https://pkgs.omamobile.org/stable/aarch64/ into the local [lenovomarchy] repo.
+#
+# Supply-chain verification:
+#   1. Exact filename and SHA-256 digest checked against
+#      image/tools/repack.omamobile.pins.
+#   2. The pinned SHA-256 of every package is cross-checked against the
+#      repository index omamobile.db, whose own GPG signature is verified.
+#   3. Detached GPG signature (.sig) verified inside the container against
+#      omamobile-keyring, itself fetched pinned and signed by the original
+#      package key. The keyring's keys must match
+#      image/tools/omamobile-trusted.fpr; because signatures are made by the
+#      release key's signing SUBKEY, the subkey's fingerprint is accepted
+#      alongside the primaries'.
+#
+# The keyring bootstrap problem (no key to verify the keyring yet) is broken
+# the same way pacman itself does it: the keyring package is pinned by SHA-256
+# here, and its signature is checked against the *original* package key that
+# the git tree at github.com/derekross/omarchy-mobile publishes — both keys are
+# then verified against omamobile-trusted.fpr. From there every other package
+# is verified against the release key's signing subkey.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/alarm.sh
+source "$SCRIPT_DIR/../lib/alarm.sh"
+
+OMAMOBILE_CHANNEL="${OMAMOBILE_CHANNEL:-stable}"
+OMAMOBILE_REPO_URL="${OMAMOBILE_REPO_URL:-https://pkgs.omamobile.org/$OMAMOBILE_CHANNEL/aarch64}"
+LIST_FILE="${1:-$SCRIPT_DIR/repack.omamobile.list}"
+PINS_FILE="${PINS_FILE:-$SCRIPT_DIR/repack.omamobile.pins}"
+FPR_FILE="${FPR_FILE:-$SCRIPT_DIR/omamobile-trusted.fpr}"
+TARGET_ARCH="${TARGET_ARCH:-aarch64}"
+
+[[ -f "$LIST_FILE" ]] || die "repack list not found: $LIST_FILE"
+[[ -f "$PINS_FILE" ]] || die "pins file not found: $PINS_FILE"
+[[ -f "$FPR_FILE"  ]] || die "trusted fingerprint file not found: $FPR_FILE"
+
+UPSTREAM_CACHE="$CACHE_DIR/omamobile-upstream/$OMAMOBILE_CHANNEL/aarch64"
+DEST_DIR="$REPO_DIR/$TARGET_ARCH"
+mkdir -p "$UPSTREAM_CACHE" "$DEST_DIR"
+
+# The keyring package that breaks the bootstrap loop. Its pin lives with the
+# other pins; its signature is verified against the ORIGINAL package key
+# (6C84…49FE), which signed it while phones moved to the release key. The
+# values are repeated inside the container script below (KR_FNAME/KR_SHA/
+# KR_FPR there).
+KEYRING_FNAME="omamobile-keyring-20261026-1-any.pkg.tar.zst"
+KEYRING_SHA="83684eeda2ae7e1929109b0a65ede42bc174e7f00fa093dc69243714a2b125a0"
+# shellcheck disable=SC2034  # documented for the reader; consumed as KR_FPR below
+KEYRING_FPR="6C84FE3D240709E70E27CC94B301F5EA62B249FE"
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        die "neither sha256sum nor shasum found"
+    fi
+}
+
+fetch_pinned() {
+    local pkg="$1" fname="$2" expected_sha="$3"
+    local path="$UPSTREAM_CACHE/$fname"
+    local sig="$path.sig"
+
+    if [[ -f "$path" ]]; then
+        local cur_sha
+        cur_sha="$(sha256_file "$path")"
+        if [[ "$cur_sha" != "$expected_sha" ]]; then
+            warn "Cached $fname SHA-256 mismatch ($cur_sha != $expected_sha); re-downloading"
+            rm -f "$path" "$sig"
+        fi
+    fi
+
+    if [[ ! -f "$path" ]]; then
+        log "Downloading $fname"
+        curl -fSL --retry 3 -o "$path.part" "$OMAMOBILE_REPO_URL/$fname"
+        mv "$path.part" "$path"
+    fi
+
+    local actual_sha
+    actual_sha="$(sha256_file "$path")"
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+        rm -f "$path"
+        die "SHA-256 mismatch for $pkg ($fname): expected $expected_sha, got $actual_sha"
+    fi
+
+    if [[ ! -f "$sig" ]]; then
+        log "Downloading $fname.sig"
+        curl -fSL --retry 3 -o "$sig.part" "$OMAMOBILE_REPO_URL/$fname.sig"
+        mv "$sig.part" "$sig"
+    fi
+}
+
+pin_lookup() {
+    local pkg="$1" field="$2"
+    awk -v p="$pkg" -v f="$field" '$1 == p { print $f; exit }' "$PINS_FILE"
+}
+
+while read -r pkg _mode _; do  # _mode: used by the container loop below
+    [[ -z "${pkg:-}" || "$pkg" =~ ^# ]] && continue
+    fn="$(pin_lookup "$pkg" 2)"
+    sha="$(pin_lookup "$pkg" 3)"
+    [[ -n "$fn" && -n "$sha" ]] || die "package '$pkg' in $LIST_FILE has no pin in $PINS_FILE"
+    fetch_pinned "$pkg" "$fn" "$sha"
+done < "$LIST_FILE"
+
+# The keyring that breaks the signature bootstrap loop (its own signature is
+# made by the ORIGINAL package key; the container checks both keys against
+# trusted.fpr).
+fetch_pinned "omamobile-keyring (bootstrap)" "$KEYRING_FNAME" "$KEYRING_SHA"
+
+# The signed repository index: the pins of everything but omacam were taken
+# from it, so fetch it fresh each run (small) and let the container verify its
+# GPG signature and cross-check the pins against it.
+log "Downloading omamobile.db + .sig (repository index)"
+curl -fsSL --retry 3 -o "$UPSTREAM_CACHE/omamobile.db.part" "$OMAMOBILE_REPO_URL/omamobile.db"
+mv "$UPSTREAM_CACHE/omamobile.db.part" "$UPSTREAM_CACHE/omamobile.db"
+curl -fsSL --retry 3 -o "$UPSTREAM_CACHE/omamobile.db.sig.part" "$OMAMOBILE_REPO_URL/omamobile.db.sig"
+mv "$UPSTREAM_CACHE/omamobile.db.sig.part" "$UPSTREAM_CACHE/omamobile.db.sig"
+
+alarm_ensure_dev aarch64
+DEV_IMG="$(alarm_dev_image aarch64)"
+
+log "Verifying GPG signatures and publishing Omarchy Mobile packages -> $DEST_DIR ($TARGET_ARCH)"
+docker run --rm --platform linux/arm64 \
+    -e "TARGET_ARCH=$TARGET_ARCH" \
+    -v "$UPSTREAM_CACHE:/upstream:ro" \
+    -v "$DEST_DIR:/out" \
+    -v "$LIST_FILE:/repack.list:ro" \
+    -v "$PINS_FILE:/repack.pins:ro" \
+    -v "$FPR_FILE:/trusted.fpr:ro" \
+    "$DEV_IMG" \
+    bash -ec '
+        set -euo pipefail
+
+        declare -A PIN_FILE PIN_SHA
+        while read -r p fn sha _; do
+            [[ -z "${p:-}" || "$p" =~ ^# ]] && continue
+            PIN_FILE["$p"]="$fn"
+            PIN_SHA["$p"]="$sha"
+        done < /repack.pins
+
+        # Every non-comment, non-empty line of trusted.fpr is a trusted
+        # fingerprint (primaries and the signing subkey).
+        mapfile -t TRUSTED_FPRS < <(
+            while IFS= read -r line || [[ -n $line ]]; do
+                line="${line%%#*}"
+                line="${line//[[:space:]]/}"
+                [[ -z "$line" ]] || printf "%s\n" "$line"
+            done < /trusted.fpr
+        )
+        [[ ${#TRUSTED_FPRS[@]} -gt 0 ]] || { echo "ERROR: empty trusted.fpr" >&2; exit 1; }
+
+        trusted() {
+            local f
+            for f in "${TRUSTED_FPRS[@]}"; do [[ "$1" == "$f" ]] && return 0; done
+            return 1
+        }
+
+        KR_FNAME="omamobile-keyring-20261026-1-any.pkg.tar.zst"
+        KR_SHA="83684eeda2ae7e1929109b0a65ede42bc174e7f00fa093dc69243714a2b125a0"
+        KR_FPR="6C84FE3D240709E70E27CC94B301F5EA62B249FE"
+
+        # 1. Keyring: pinned SHA-256, signature made by the ORIGINAL key whose
+        #    fingerprint is pinned in this script.
+        echo "$KR_SHA  /upstream/$KR_FNAME" | sha256sum -c --quiet -
+        GNUPGHOME="$(mktemp -d)"
+        chmod 700 "$GNUPGHOME"
+        export GNUPGHOME
+        KR_WORK="$(mktemp -d)"
+        bsdtar -xf "/upstream/$KR_FNAME" -C "$KR_WORK" usr/share/pacman/keyrings/omamobile.gpg
+        gpg --batch --quiet --import "$KR_WORK/usr/share/pacman/keyrings/omamobile.gpg"
+        rm -rf "$KR_WORK"
+        gpgv --keyring "$GNUPGHOME/pubring.kbx" "/upstream/$KR_FNAME.sig" "/upstream/$KR_FNAME" 2>/dev/null
+
+        # 2. Every key in the keyring must be a trusted fingerprint (primary
+        #    or the signing subkey): the keyring may not smuggle a stranger.
+        while IFS= read -r fpr; do
+            trusted "$fpr" || {
+                echo "ERROR: keyring contains untrusted key: $fpr" >&2
+                exit 1
+            }
+        done < <(gpg --batch --with-colons --fingerprint | awk -F: "/^fpr:/{print \$10}")
+
+        # 3. Verify the repository index signature and cross-check every pin
+        #    against the digest the signed index carries.
+        gpgv --keyring "$GNUPGHOME/pubring.kbx" /upstream/omamobile.db.sig /upstream/omamobile.db 2>/dev/null
+        DB_WORK="$(mktemp -d)"
+        bsdtar -xf /upstream/omamobile.db -C "$DB_WORK"
+        for pkg in "${!PIN_SHA[@]}"; do
+            db_sha=""
+            for d in "$DB_WORK"/*/desc; do
+                found="$(awk -v n="$pkg" "
+                    /^%NAME%\$/ { getline; if (\$1 != n) nextfile; name = 1 }
+                    /^%SHA256SUM%\$/ && name { getline; print \$1; exit }
+                " "$d")"
+                if [[ -n "$found" ]]; then db_sha="$found"; break; fi
+            done
+            [[ -n "$db_sha" ]] || { echo "ERROR: $pkg not found in signed omamobile.db" >&2; exit 1; }
+            [[ "$db_sha" == "${PIN_SHA[$pkg]}" ]] || {
+                echo "ERROR: pin for $pkg (${PIN_SHA[$pkg]}) does not match the signed repository index ($db_sha)" >&2
+                exit 1
+            }
+        done
+        rm -rf "$DB_WORK"
+        echo "  [gpg] keyring + repository index verified; pins match the signed index"
+
+        # 4. Verify each package signature and publish it.
+        while read -r pkg mode _; do
+            [[ -z "${pkg:-}" || "$pkg" =~ ^# ]] && continue
+            fname="${PIN_FILE[$pkg]}"
+            expected_sha="${PIN_SHA[$pkg]}"
+            src="/upstream/$fname"
+            sig="/upstream/$fname.sig"
+
+            echo "${expected_sha}  ${src}" | sha256sum -c --quiet -
+            gpgv --keyring "$GNUPGHOME/pubring.kbx" "$sig" "$src" 2>/dev/null
+            echo "  [ok]  $fname (sha256 + gpg sig verified)"
+
+            case "$mode" in
+                copy-any)
+                    parch="$(bsdtar -xOf "$src" .PKGINFO | awk -F" = " "\$1==\"arch\"{print \$2; exit}")"
+                    if [[ "$parch" != "any" ]]; then
+                        echo "ERROR: $pkg expected arch=any, got arch=$parch" >&2
+                        exit 1
+                    fi
+                    cp -f "$src" "/out/$fname"
+                    ;;
+
+                copy-elf)
+                    parch="$(bsdtar -xOf "$src" .PKGINFO | awk -F" = " "\$1==\"arch\"{print \$2; exit}")"
+                    if [[ "$parch" != "aarch64" ]]; then
+                        echo "ERROR: $pkg expected arch=aarch64, got arch=$parch" >&2
+                        exit 1
+                    fi
+                    cp -f "$src" "/out/$fname"
+                    ;;
+
+                *)
+                    echo "ERROR: unknown mode $mode for $pkg" >&2
+                    exit 1
+                    ;;
+            esac
+        done < /repack.list
+
+        rm -rf "$GNUPGHOME"
+    '
+
+alarm_repo_index "$TARGET_ARCH"
+log "Done. Repository contents:"
+ls -lh "$DEST_DIR"

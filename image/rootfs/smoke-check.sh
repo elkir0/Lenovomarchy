@@ -94,6 +94,61 @@ else
     pass "no PRIVATE KEY in /etc, /root, /home, /var, /usr, /opt"
 fi
 
+# 10. Omarchy 4.5 migration state: nothing pending for alarm (every shipped
+#     migration is marked done by omarchy-user-setup.sh at build time).
+pending="$(su - alarm -c 'cd /home/alarm && omarchy-migrate --pending' 2>/dev/null || true)"
+if [[ -z "$pending" ]]; then
+    pass "omarchy-migrate --pending is empty for alarm"
+else
+    fail "omarchy-migrate --pending lists: $(echo "$pending" | tr '\n' ' ')"
+fi
+
+# 11. The omamobile-omarchy patch series is applied and verifies.
+if omamobile-omarchy-patches verify >/dev/null 2>&1; then
+    pass "omamobile-omarchy-patches verify"
+else
+    fail "omamobile-omarchy-patches verify failed"
+fi
+
+# 12. Installed versions match the pins / PKGBUILDs.
+expect_version() {  # <pkg> <expected pkgver-pkgrel>
+    local got
+    got="$(pacman -Q "$1" 2>/dev/null | awk '{print $2}')"
+    if [[ "$got" == "$2" ]]; then
+        pass "$1 $got (matches pin/PKGBUILD)"
+    else
+        fail "$1 version $got, expected $2"
+    fi
+}
+expect_version omarchy            "4.5.0-3"
+expect_version omarchy-settings   "4.5.0-3"
+expect_version omamobile-omarchy  "0.1.48-1"
+expect_version omamobile-shell    "0.2.133-3"
+expect_version libcamera         "0.7.2-4.5"
+expect_version omacam             "0.3.3-1"
+
+# 13. mako must not be installed (Omarchy 4.5's shell is the notification
+#     server; mako steals the D-Bus name at boot).
+if pacman -Q mako >/dev/null 2>&1; then
+    fail "mako is installed (would steal org.freedesktop.Notifications)"
+else
+    pass "mako not installed"
+fi
+
+# 14. omacam present with resolved shared libraries.
+if [[ -x /usr/bin/omacam ]] && ! ldd /usr/bin/omacam 2>/dev/null | grep -q 'not found'; then
+    pass "/usr/bin/omacam present and ldd resolves"
+else
+    fail "/usr/bin/omacam missing or has unresolved libraries"
+fi
+
+# 15. The migration hold list is installed (for in-place Omarchy upgrades).
+if [[ -f /usr/share/lenovomarchy/omarchy-migrations.hold ]]; then
+    pass "hold list at /usr/share/lenovomarchy/omarchy-migrations.hold ($(grep -cve '^\s*\(#\|$\)' /usr/share/lenovomarchy/omarchy-migrations.hold) entries)"
+else
+    fail "hold list missing at /usr/share/lenovomarchy/omarchy-migrations.hold"
+fi
+
 if [[ "$FAIL" -gt 0 ]]; then
     echo "==> [smoke-check] FAILED with $FAIL error(s)" >&2
     exit 1

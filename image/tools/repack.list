@@ -5,9 +5,14 @@
 #   copy-any       : upstream pkg already has arch=any; copy after SHA-256 + GPG check
 #   verify-noarch  : upstream pkg is tagged arch=aarch64; verify no ELF binaries exist
 #                    inside the archive and publish into the local repo
+#   verify-elf     : upstream pkg is tagged arch=aarch64 AND contains ELF
+#                    binaries (e.g. omarchy-speedtest's /usr/lib/omarchy/speedtest):
+#                    after SHA-256 + GPG check, verify every ELF file is
+#                    aarch64 and publish into the local repo
 
 omarchy                           verify-noarch
 omarchy-settings                  verify-noarch
+omarchy-speedtest                 verify-elf
 omarchy-keyring                   copy-any
 omarchy-themes-intros             copy-any
 omarchy-nvim                      copy-any
