@@ -1,0 +1,547 @@
+simple: add contrast autofocus to the soft IPA
+
+---
+ .../internal/software_isp/swisp_stats.h       |   8 +
+ src/ipa/simple/algorithms/af.cpp              | 284 ++++++++++++++++++
+ src/ipa/simple/algorithms/af.h                |  70 +++++
+ src/ipa/simple/algorithms/meson.build         |   3 +-
+ src/ipa/simple/data/uncalibrated.yaml         |   3 +
+ src/ipa/simple/ipa_context.h                  |   5 +
+ src/ipa/simple/soft_simple.cpp                |  19 +-
+ src/libcamera/software_isp/swstats_cpu.cpp    |  15 +-
+ 8 files changed, 399 insertions(+), 8 deletions(-)
+ create mode 100644 src/ipa/simple/algorithms/af.cpp
+ create mode 100644 src/ipa/simple/algorithms/af.h
+
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index d9d0d9b..d7dc715 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -43,6 +43,14 @@ struct SwIspStats {
+ 	 * \brief A histogram of luminance values of all the sampled pixels
+ 	 */
+ 	Histogram yHistogram;
++	/**
++	 * \brief Sum of absolute horizontal differences of the green samples
++	 *
++	 * A cheap figure of merit for image sharpness, used by the contrast
++	 * autofocus algorithm: it grows as high-frequency content (edges)
++	 * increases, which correlates with the image being in focus.
++	 */
++	uint64_t sharpness;
+ };
+ 
+ } /* namespace libcamera */
+diff --git a/src/ipa/simple/algorithms/af.cpp b/src/ipa/simple/algorithms/af.cpp
+new file mode 100644
+index 0000000..d567b2f
+--- /dev/null
++++ b/src/ipa/simple/algorithms/af.cpp
+@@ -0,0 +1,286 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++/*
++ * Copyright (C) 2026, Lenovomarchy contributors
++ *
++ * Contrast detection autofocus
++ */
++
++#include "af.h"
++
++#include <algorithm>
++
++#include <libcamera/base/log.h>
++
++#include "control_ids.h"
++
++namespace libcamera {
++
++namespace ipa::soft::algorithms {
++
++LOG_DEFINE_CATEGORY(IPASoftAf)
++
++/*
++ * Lens movement step of the coarse sweep, in lens driver units. The default
++ * of 30 divides the typical 0-1023 range in ~34 measurements, which
++ * DW9718-class actuators settle between in a couple of frames.
++ */
++static constexpr uint32_t kDefaultCoarseStep = 30;
++
++/* Lens movement step of the fine sweep, in lens driver units. */
++static constexpr uint32_t kDefaultFineStep = 5;
++
++/*
++ * Number of statistics events to wait after a lens movement before
++ * measuring: statistics are computed once every 4 frames and the actuator
++ * needs about two frames to settle, so 2 events (~8 frames) cover both.
++ */
++static constexpr uint32_t kDefaultSettleFrames = 2;
++
++/*
++ * Continuous mode: retrigger a scan when the sharpness stays below this
++ * ratio of the sharpness measured at the focused position, for this many
++ * consecutive statistics events.
++ */
++static constexpr double kDefaultRetriggerRatio = 0.7;
++static constexpr uint32_t kDefaultRetriggerFrames = 3;
++
++Af::Af()
++	: coarseStep_(kDefaultCoarseStep), fineStep_(kDefaultFineStep),
++	  settleFrames_(kDefaultSettleFrames),
++	  retriggerRatio_(kDefaultRetriggerRatio),
++	  retriggerFrames_(kDefaultRetriggerFrames),
++	  afMode_(controls::AfModeManual), afState_(controls::AfStateIdle),
++	  scanState_(ScanState::Idle), settleCounter_(0), bestFocus_(0),
++	  bestSharpness_(0), hasBest_(false), fineMin_(0), fineMax_(0),
++	  focusSharpness_(0), retriggerCount_(0)
++{
++}
++
++int Af::init(IPAContext &context, const ValueNode &tuningData)
++{
++	/*
++	 * Without a lens there is nothing to do; the algorithm stays idle
++	 * and no controls are declared.
++	 */
++	if (!context.configuration.lens.present)
++		return 0;
++
++	/*
++	 * Declare the modes this algorithm implements. AfModeContinuous is
++	 * included: it retriggers a scan when the sharpness drops and stays
++	 * low (see kDefaultRetriggerRatio). AfState is reported in the
++	 * request metadata only and is not declared as a settable control.
++	 */
++	const ControlValue afModeValues[] = {
++		ControlValue(static_cast<int32_t>(controls::AfModeManual)),
++		ControlValue(static_cast<int32_t>(controls::AfModeAuto)),
++		ControlValue(static_cast<int32_t>(controls::AfModeContinuous)),
++	};
++	context.ctrlMap[&controls::AfMode] =
++		ControlInfo(afModeValues, afModeValues[0]);
++	context.ctrlMap[&controls::AfTrigger] =
++		ControlInfo(controls::AfTriggerValues);
++
++	coarseStep_ = tuningData["coarseStep"].get<uint32_t>(kDefaultCoarseStep);
++	fineStep_ = tuningData["fineStep"].get<uint32_t>(kDefaultFineStep);
++	settleFrames_ = tuningData["settleFrames"].get<uint32_t>(kDefaultSettleFrames);
++	retriggerRatio_ =
++		tuningData["retriggerRatio"].get<double>(kDefaultRetriggerRatio);
++	retriggerFrames_ =
++		tuningData["retriggerFrames"].get<uint32_t>(kDefaultRetriggerFrames);
++
++	return 0;
++}
++
++int Af::configure(IPAContext &context,
++		  [[maybe_unused]] const IPAConfigInfo &configInfo)
++{
++	if (!context.configuration.lens.present)
++		return 0;
++
++	afMode_ = controls::AfModeManual;
++	context.activeState.lens.afAuto = false;
++	afState_ = controls::AfStateIdle;
++	scanState_ = ScanState::Idle;
++	settleCounter_ = 0;
++	bestFocus_ = context.configuration.lens.min;
++	bestSharpness_ = 0;
++	hasBest_ = false;
++	focusSharpness_ = 0;
++	retriggerCount_ = 0;
++
++	return 0;
++}
++
++void Af::queueRequest(IPAContext &context, const uint32_t frame,
++		      [[maybe_unused]] IPAFrameContext &frameContext,
++		      const ControlList &controls)
++{
++	if (!context.configuration.lens.present)
++		return;
++
++	const auto &afMode = controls.get(controls::AfMode);
++	if (afMode.has_value() && afMode.value() != afMode_) {
++		afMode_ = afMode.value();
++		context.activeState.lens.afAuto =
++			afMode_ != controls::AfModeManual;
++
++		/* Any mode change cancels an in-progress scan. */
++		scanState_ = ScanState::Idle;
++		settleCounter_ = 0;
++		afState_ = controls::AfStateIdle;
++		retriggerCount_ = 0;
++	}
++
++	const auto &afTrigger = controls.get(controls::AfTrigger);
++	if (afTrigger.has_value() && afMode_ == controls::AfModeAuto) {
++		if (afTrigger.value() == controls::AfTriggerStart)
++			startScan(context);
++		else {
++			scanState_ = ScanState::Idle;
++			settleCounter_ = 0;
++			afState_ = controls::AfStateIdle;
++		}
++	}
++}
++
++void Af::startScan(IPAContext &context)
++{
++	if (scanState_ != ScanState::Idle)
++		return;
++
++	/* Start the coarse sweep at the far end of the range. */
++	scanState_ = ScanState::Coarse;
++	settleCounter_ = settleFrames_;
++	bestFocus_ = context.configuration.lens.min;
++	bestSharpness_ = 0;
++	hasBest_ = false;
++	retriggerCount_ = 0;
++	afState_ = controls::AfStateScanning;
++	context.activeState.lens.position = context.configuration.lens.min;
++	LOG(IPASoftAf, Debug) << "Coarse scan started";
++}
++
++void Af::process(IPAContext &context, const uint32_t frame,
++		 [[maybe_unused]] IPAFrameContext &frameContext,
++		 const SwIspStats *stats,
++		 ControlList &metadata)
++{
++	if (!context.configuration.lens.present)
++		return;
++
++	metadata.set(controls::AfState, afState_);
++
++	if (!stats->valid)
++		return;
++
++	if (afMode_ == controls::AfModeManual)
++		return;
++
++	/* Wait for the lens to settle and the statistics to refresh. */
++	if (settleCounter_) {
++		settleCounter_--;
++		return;
++	}
++
++	/* Per unit of green level, so a brightness change is not a focus change. */
++	const uint64_t sharpness = stats->sharpness * 1000000 /
++				   std::max<uint64_t>(stats->sum_.g(), 1);
++	const int32_t position = context.activeState.lens.position;
++
++	LOG(IPASoftAf, Debug)
++		<< "frame " << frame << " focus " << position
++		<< " sharpness " << sharpness;
++
++	switch (scanState_) {
++	case ScanState::Idle:
++		/*
++		 * Continuous mode: retrigger a scan when the sharpness stays
++		 * well below the value measured when the last scan settled.
++		 * This catches both subject movement and scene changes.
++		 */
++		if (afMode_ == controls::AfModeContinuous && focusSharpness_) {
++			if (sharpness < retriggerRatio_ * focusSharpness_) {
++				retriggerCount_++;
++				if (retriggerCount_ >= retriggerFrames_) {
++					LOG(IPASoftAf, Debug)
++						<< "Continuous retrigger";
++					startScan(context);
++				}
++			} else {
++				retriggerCount_ = 0;
++			}
++		}
++		break;
++
++	case ScanState::Coarse:
++		if (!hasBest_ || sharpness > bestSharpness_) {
++			/* Still climbing: record the peak and step forward. */
++			bestSharpness_ = sharpness;
++			bestFocus_ = position;
++			hasBest_ = true;
++
++			if (position + coarseStep_ <= context.configuration.lens.max) {
++				context.activeState.lens.position =
++					position + coarseStep_;
++				settleCounter_ = settleFrames_;
++				break;
++			}
++		} else if (sharpness + sharpness / 10 >= bestSharpness_) {
++			/* Within 10% of the peak: keep scanning. */
++			if (position + coarseStep_ <= context.configuration.lens.max) {
++				context.activeState.lens.position =
++					position + coarseStep_;
++				settleCounter_ = settleFrames_;
++				break;
++			}
++		}
++
++		/*
++		 * The sharpness dropped significantly, or the near end of the
++		 * range was reached: the peak is behind us, refine around it.
++		 */
++		fineMin_ = std::max(context.configuration.lens.min,
++				    bestFocus_ - static_cast<int32_t>(coarseStep_));
++		fineMax_ = std::min(context.configuration.lens.max,
++				    bestFocus_ + static_cast<int32_t>(coarseStep_));
++		scanState_ = ScanState::Fine;
++		bestSharpness_ = 0;
++		hasBest_ = false;
++		context.activeState.lens.position = fineMin_;
++		settleCounter_ = settleFrames_;
++		LOG(IPASoftAf, Debug) << "Fine scan " << fineMin_ << "-" << fineMax_;
++		break;
++
++	case ScanState::Fine:
++		if (!hasBest_ || sharpness > bestSharpness_) {
++			bestSharpness_ = sharpness;
++			bestFocus_ = position;
++			hasBest_ = true;
++		}
++
++		if (position + fineStep_ <= fineMax_) {
++			context.activeState.lens.position = position + fineStep_;
++			settleCounter_ = settleFrames_;
++			break;
++		}
++
++		/* The sweep is complete: settle on the best position. */
++		scanState_ = ScanState::Idle;
++		context.activeState.lens.position = bestFocus_;
++		settleCounter_ = settleFrames_;
++		afState_ = hasBest_ ? controls::AfStateFocused
++				    : controls::AfStateFailed;
++		focusSharpness_ = bestSharpness_;
++		LOG(IPASoftAf, Debug)
++			<< "AF done, focus " << bestFocus_
++			<< " sharpness " << bestSharpness_;
++		break;
++	}
++}
++
++REGISTER_IPA_ALGORITHM(Af, "Af")
++
++} /* namespace ipa::soft::algorithms */
++
++} /* namespace libcamera */
+diff --git a/src/ipa/simple/algorithms/af.h b/src/ipa/simple/algorithms/af.h
+new file mode 100644
+index 0000000..bfd0eb3
+--- /dev/null
++++ b/src/ipa/simple/algorithms/af.h
+@@ -0,0 +1,70 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++/*
++ * Copyright (C) 2026, Lenovomarchy contributors
++ *
++ * Contrast detection autofocus
++ */
++
++#pragma once
++
++#include <stdint.h>
++
++#include "algorithm.h"
++
++namespace libcamera {
++
++namespace ipa::soft::algorithms {
++
++class Af : public Algorithm
++{
++public:
++	Af();
++	~Af() = default;
++
++	int init(IPAContext &context, const ValueNode &tuningData) override;
++	int configure(IPAContext &context, const IPAConfigInfo &configInfo) override;
++	void queueRequest(IPAContext &context, const uint32_t frame,
++			  IPAFrameContext &frameContext,
++			  const ControlList &controls) override;
++	void process(IPAContext &context, const uint32_t frame,
++		     IPAFrameContext &frameContext,
++		     const SwIspStats *stats,
++		     ControlList &metadata) override;
++
++private:
++	enum class ScanState {
++		Idle,
++		Coarse,
++		Fine,
++	};
++
++	void startScan(IPAContext &context);
++
++	/* Tuning parameters, with the compiled-in defaults. */
++	uint32_t coarseStep_;
++	uint32_t fineStep_;
++	uint32_t settleFrames_;
++	double retriggerRatio_;
++	uint32_t retriggerFrames_;
++
++	/* Current mode and reported state. */
++	int32_t afMode_;
++	int32_t afState_;
++
++	/* Scan state. */
++	ScanState scanState_;
++	uint32_t settleCounter_;
++	int32_t bestFocus_;
++	uint64_t bestSharpness_;
++	bool hasBest_;
++	int32_t fineMin_;
++	int32_t fineMax_;
++
++	/* Continuous mode retrigger bookkeeping. */
++	uint64_t focusSharpness_;
++	uint32_t retriggerCount_;
++};
++
++} /* namespace ipa::soft::algorithms */
++
++} /* namespace libcamera */
+diff --git a/src/ipa/simple/algorithms/meson.build b/src/ipa/simple/algorithms/meson.build
+index 73c6372..5073e1d 100644
+--- a/src/ipa/simple/algorithms/meson.build
++++ b/src/ipa/simple/algorithms/meson.build
+@@ -2,8 +2,9 @@
+ 
+ soft_simple_ipa_algorithms = files([
+     'adjust.cpp',
+-    'awb.cpp',
++    'af.cpp',
+     'agc.cpp',
++    'awb.cpp',
+     'blc.cpp',
+     'ccm.cpp',
+ ])
+diff --git a/src/ipa/simple/data/uncalibrated.yaml b/src/ipa/simple/data/uncalibrated.yaml
+index fc90ca5..ec6ccc5 100644
+--- a/src/ipa/simple/data/uncalibrated.yaml
++++ b/src/ipa/simple/data/uncalibrated.yaml
+@@ -16,4 +16,7 @@ algorithms:
+   #                0, 0, 1]
+   - Adjust:
+   - Agc:
++  # Contrast detection autofocus; inert on sensors without a focus
++  # actuator.
++  - Af:
+ ...
+diff --git a/src/ipa/simple/ipa_context.h b/src/ipa/simple/ipa_context.h
+index a24ca41..41f8ef9 100644
+--- a/src/ipa/simple/ipa_context.h
++++ b/src/ipa/simple/ipa_context.h
+@@ -53,6 +53,11 @@ struct IPAActiveState {
+ 	struct {
+ 		/* Current lens driver position. */
+ 		int32_t position;
++		/*
++		 * True when the Af algorithm is in an automatic mode and owns
++		 * the lens; the LensPosition control is ignored then.
++		 */
++		bool afAuto;
+ 	} lens;
+ 
+ 	struct {
+diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
+index a022ba9..7f2e40d 100644
+--- a/src/ipa/simple/soft_simple.cpp
++++ b/src/ipa/simple/soft_simple.cpp
+@@ -125,6 +125,7 @@ int IPASoftSimple::init(const IPASettings &settings,
+ 	 * a normalized scale keeps applications portable across actuators.
+ 	 */
+ 	lensInfoMap_ = lensControls;
++	lensPositionApplied_ = INT32_MIN;
+ 	auto lensIt = lensInfoMap_.find(V4L2_CID_FOCUS_ABSOLUTE);
+ 	if (lensIt != lensInfoMap_.end()) {
+ 		const ControlInfo &lensInfo = lensIt->second;
+@@ -337,14 +338,22 @@ void IPASoftSimple::queueRequest(const uint32_t frame, const ControlList &contro
+ 	 * Apply the manual focus control directly, independently of any
+ 	 * algorithm: the Af algorithm may not be enabled in the tuning file,
+ 	 * and with AfModeManual the LensPosition control is the only way to
+-	 * move the lens.
++	 * move the lens. The control is ignored when the request switches to
++	 * (or stays in) an automatic mode that owns the lens.
+ 	 */
+ 	const auto &lensPosition = controls.get(controls::LensPosition);
+ 	if (lensPosition.has_value() && context_.configuration.lens.present) {
+-		const float pos = std::clamp(lensPosition.value(), 0.0f, 1.0f);
+-		setLensPosition(context_.configuration.lens.min +
+-				pos * (context_.configuration.lens.max -
+-				       context_.configuration.lens.min));
++		const auto &afMode = controls.get(controls::AfMode);
++		const bool afAuto = afMode.has_value()
++			? afMode.value() != controls::AfModeManual
++			: context_.activeState.lens.afAuto;
++
++		if (!afAuto) {
++			const float pos = std::clamp(lensPosition.value(), 0.0f, 1.0f);
++			setLensPosition(context_.configuration.lens.min +
++					pos * (context_.configuration.lens.max -
++					       context_.configuration.lens.min));
++		}
+ 	}
+ 
+ 	for (const auto &algo : algorithms())
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 7fb77ce..d56b584 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -174,15 +174,22 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ #define SWSTATS_START_LINE_STATS(pixel_t) \
+ 	pixel_t r, g, g2, b;              \
+ 	uint64_t yVal;                    \
++	uint64_t prevG = 0;               \
++	bool firstG = true;               \
+                                           \
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+-	uint64_t sumB = 0;
++	uint64_t sumB = 0;                \
++	uint64_t sharpness = 0;
+ 
+ #define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+ 	sumR += r;                         \
+ 	sumG += g;                         \
+ 	sumB += b;                         \
++	if (!firstG)                       \
++		sharpness += g > prevG ? g - prevG : prevG - g; \
++	firstG = false;                    \
++	prevG = g;                         \
+                                            \
+ 	yVal = r * kRedYMul;               \
+ 	yVal += g * kGreenYMul;            \
+@@ -192,7 +199,8 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ #define SWSTATS_FINISH_LINE_STATS() \
+ 	stats.sum_.r() += sumR;     \
+ 	stats.sum_.g() += sumG;     \
+-	stats.sum_.b() += sumB;
++	stats.sum_.b() += sumB;     \
++	stats.sharpness += sharpness;
+ 
+ void SwStatsCpu::statsBGGR8Line0(const uint8_t *src[], SwIspStats &stats)
+ {
+@@ -392,6 +400,7 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 	for (auto &s : stats_) {
+ 		s.sum_ = RGB<uint64_t>({ 0, 0, 0 });
+ 		s.yHistogram.fill(0);
++		s.sharpness = 0;
+ 	}
+ }
+ 
+@@ -409,10 +418,12 @@ void SwStatsCpu::finishFrame(uint32_t frame, uint32_t bufferId)
+ 	if (valid) {
+ 		sharedStats_->sum_ = RGB<uint64_t>({ 0, 0, 0 });
+ 		sharedStats_->yHistogram.fill(0);
++		sharedStats_->sharpness = 0;
+ 		for (const auto &s : stats_) {
+ 			sharedStats_->sum_ += s.sum_;
+ 			for (unsigned int j = 0; j < SwIspStats::kYHistogramSize; j++)
+ 				sharedStats_->yHistogram[j] += s.yHistogram[j];
++			sharedStats_->sharpness += s.sharpness;
+ 		}
+ 
+ 		sharedStats_->sum_ >>= sumShift_;
+-- 
+2.52.0
+

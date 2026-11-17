@@ -281,4 +281,30 @@ minutes on the eight cores) and installed:
 - Colours stay dull and slightly green: there is no colour matrix, and
   making one needs a colour chart under known light.
 - The 4.3 packages on the tablet were built with target 2.0; the
-  installed tuning files were then replaced by the 1.6 ones by hand.
+  installed tuning files were then replaced by the 1.6 ones by hand
+  (4.4 is built with 1.6).
+
+## Focus through libcamera (2026-11-17)
+
+- Package 0.7.2-4.4 adds `libcamera-0.7.2-yt11-lens.patch` and
+  `libcamera-0.7.2-yt11-af.patch`. The rear camera lists `LensPosition`
+  (0.0 far to 1.0 near, linear over 0..1023), `AfMode` and `AfTrigger`;
+  the front camera lists none and captures as before at 30 fps.
+- Manual: `LensPosition` 0.0, 0.33 and 1.0 from a `cam --script` file
+  move the actuator to 0, 337 and 1023.
+- Autofocus (`AfMode: 1` + `AfTrigger: 0`), subject at about 40 cm: with
+  the stock steps it ends at 330 in 18 s; with `coarseStep` 60,
+  `fineStep` 10, `settleFrames` 1 (kept in `ov8856.yaml`) it takes about
+  8.5 s, `AfState` going from scanning to focused.
+- With the raw sharpness sum, in a dim room (gain 16x, exposure at
+  maximum) 3 runs in 10 ended elsewhere (300, 370, about 100): the sum
+  follows brightness and only varies by about 10 % across the sweep. The
+  figure is now divided by the green sum; after that 8 runs in 8 ended
+  at 320.
+- Not tested: `AfModeContinuous`, a far subject, low light. The lens
+  subdev stays open, so the actuator supply stays on, as long as a
+  libcamera process holds the camera manager.
+- Faults found on the unit and fixed in the patches: the IPA moved the
+  lens during `configure()`, before the proxy was running (fatal
+  assertion); two `std::min`/`std::max` calls mixed signed and unsigned;
+  sharpness was not normalised by brightness.

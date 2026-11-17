@@ -12,6 +12,10 @@
 #   - libcamera-0.7.2-yt11-agc.patch lets the soft IPA's tuning file set
 #     the auto-exposure speed and target; ov8856.yaml and s5k4h7.yaml are
 #     this tablet's tuning files.
+#   - libcamera-0.7.2-yt11-lens.patch drives the rear camera's focus
+#     actuator from the simple pipeline (LensPosition control), and
+#     libcamera-0.7.2-yt11-af.patch adds a contrast autofocus algorithm
+#     to the soft IPA (AfMode, AfTrigger, AfState).
 #   - Only the simple pipeline and the soft IPA are built, and the heavy
 #     extras the tablet does not need (docs, GStreamer plugin, Python
 #     bindings, lc-compliance) are disabled so `makepkg -s` on the tablet
@@ -29,7 +33,7 @@ pkgname=(
   libcamera-tools
 )
 pkgver=0.7.2
-pkgrel=4.3
+pkgrel=4.4
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
 arch=(aarch64)
 url="https://libcamera.org/"
@@ -67,6 +71,8 @@ source=(
   "$pkgbase-$pkgver-simple-mt6785.patch"
   "$pkgbase-$pkgver-yt11-sensors.patch"
   "$pkgbase-$pkgver-yt11-agc.patch"
+  "$pkgbase-$pkgver-yt11-lens.patch"
+  "$pkgbase-$pkgver-yt11-af.patch"
   "ov8856.yaml"
   "s5k4h7.yaml"
 )
@@ -74,13 +80,17 @@ sha512sums=('SKIP'
             '62fb7a6f50502e98ee2c5541ef1f4a04a713af3ed8eddf0d6b6471bf27146ef623f1fa3f0b9fa1b2c3ca08863c24eed9cebdbee089fb8c1fd1c681dec2d026ee'
             '8c649c7b47508b15df394e0ed1f63ca5662c19045d059b76746786b9e76857f284a7d3a94f92f3c14942cbe6f2169f711e44f348e8602a0d615ef067a073a694'
             'c22552d43f041a8d98d933ca8d8c6fb89f2371cb33020b497b10a7d239317b3c50780a8cd6b2339c6df80b3dd78a792c46450e1f4ec30c23f1ceefce1b5cdf2b'
-            'acdda08b2ace1aab5c4105d92f540f9f8e261b8a942962aab699dda231ddda52c1550f3a3c378926eeb520cf851e7ba515f41506c3d957f9ab56edee92a20f80'
+            '538c6adc0c0fd925f8820a146c21f0a5d4b4b12525d428d3541901f558271150cce67067ef4c9df3cc7f33a14d3ca8630eb30fbc5b0bd390ed50e5bbceabafde'
+            'be58bc185d1609b2e924a1a604b89c64874b42b8fd1c5a0ebb2e725468b9b807a329bf7ce9fe0627e4eb0193313c87268be2c4f6451a39f39da5ba057cf0ccf3'
+            '625360c54f773b6d799ffa0ae05ad97c03e557fa12a46288015ecfb28afe50afa15c0fc83de993185ad983168413d3b8e0b1be9c22f50c8bb162322591414609'
             'def4713b28cda65e8f1aa25289407ee70152dab1e73384a640a9c95a6438c2ffd62dae621a6cf741127cd1e9866370edfee4e6a784301a9a80a84113ec57e198')
 b2sums=('SKIP'
         '73f3399218201a8ce0358b8bc58ffeff57a5010a3cb6a48aa21f1509b2642a621cbacabfb34939b048d97760cd26fcd64b390ad0d525e16c4f020aa63ae4c62f'
         '9c57cd8ba76a5b761bfa0e1652ba2ccbac538b225affaa7ba323d81b23e5357d4b47a7e57027c671c470d38264363744ceeaf373844c9140ee10b853dc96f3fc'
         '2b586acd15b9fb7c48e850351fd0ed7cd7a8c693dbf3bc1f7818e3bd5954485953eafbf509e62c52e05e4c7359ce087b5f48a42d1fcb1db43acc8973d6de1a7b'
-        'fd4cad044f2ab09b45014d86f21ac5046a61ccb33ef87136e2b23a473199481a757e23922c9b42c2211aca9d6dcf96fe884392b32e743f6aa11ea2c58115a7d3'
+        '3aa1ffba8e0102b2257a6c5db8f985898ef793a3855845386a5121bccbc6b418537b0df608f795b49142548e93ca41dada46e7574d6f0617f192e0b2826bab22'
+        '45b4e6a92d25686ae3dfa5c10035c9f148fcc1b4c3a5e48c97105bd48857c9a4b734b8d57f4e2ceb93737a73c40323a4cfa81a699c8db4d5547f9b0104b4f2a3'
+        'fa8e162c4812afe6671853b31671251d96c1e60a97fe6b3dae4bc994d2bfa1faeaa9c6395d2bda4cdb5ee34ef199f1d28dedc9c06fb8d66d97ee95b16251071c'
         '864a07696f307dd53708ab9e02a5908b637d7265d5dbd94c813ca4b4eb653037e355cbeddb927a8ac328cd5a57b4a26c7f47ad1e110cfb1f0c879a516bc5a1a4')
 
 _pick() {
@@ -98,6 +108,8 @@ prepare() {
   patch -Np1 < ../$pkgbase-$pkgver-simple-mt6785.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-sensors.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-agc.patch
+  patch -Np1 < ../$pkgbase-$pkgver-yt11-lens.patch
+  patch -Np1 < ../$pkgbase-$pkgver-yt11-af.patch
 
   # add version, so that utils/gen-version.sh may rely on it
   printf "%s\n" "$pkgver" > .tarball-version

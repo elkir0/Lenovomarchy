@@ -70,6 +70,21 @@ keeps the highlights. They hold no colour matrix: colours stay dull
 until the sensors are characterized. Analysis in
 `docs/research/camera/T18-LIBCAMERA-AGC.md`.
 
+### Focus (`libcamera-0.7.2-yt11-lens.patch`, `libcamera-0.7.2-yt11-af.patch`)
+
+The first patch makes the simple pipeline hand the sensor's focus lens
+(the rear camera's DW9718S, through `CameraSensor::focusLens()`) to the
+soft IPA, which exposes `LensPosition`: 0.0 is the far end of the
+actuator's range and 1.0 the near end, linearly (no dioptre calibration
+exists). The second adds a sharpness figure to the software ISP
+statistics and an `Af` algorithm: `AfModeAuto` with `AfTrigger` runs a
+coarse then a fine sweep and reports `AfState`; `AfModeContinuous`
+starts a new sweep when sharpness stays low. `Af:` in the tuning file
+takes `coarseStep`, `fineStep`, `settleFrames`, `retriggerRatio` and
+`retriggerFrames`. A camera without a lens (the front one) gets none of
+these controls. Design and limits:
+`docs/research/camera/T19-LIBCAMERA-LENS.md`.
+
 ## Building on the tablet
 
 Copy this directory to the tablet (it has no other repo dependencies)
@@ -79,9 +94,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.3-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.3-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.3-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.4-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.4-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.4-aarch64.pkg.tar.xz
 ```
 
 Notes:

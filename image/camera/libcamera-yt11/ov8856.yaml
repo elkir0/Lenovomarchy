@@ -24,4 +24,11 @@ algorithms:
       maxStep: 0.35
       deadband: 0.1
       optimalExposure: 1.6
+  - Af:
+      # Measured on the tablet: four runs on a subject at about 40 cm end
+      # at 330 to 340 in about 8.5 s. The stock values (30 / 5 / 2) find
+      # the same position in 18 s.
+      coarseStep: 60
+      fineStep: 10
+      settleFrames: 1
 ...

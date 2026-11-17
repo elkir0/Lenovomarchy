@@ -1,0 +1,431 @@
+simple: support manual focus through the LensPosition control
+
+---
+ .../internal/software_isp/software_isp.h      |   3 +
+ include/libcamera/ipa/soft.mojom              |   4 +-
+ src/ipa/simple/ipa_context.h                  |  13 ++
+ src/ipa/simple/soft_simple.cpp                | 117 ++++++++++++++++++
+ src/libcamera/pipeline/simple/simple.cpp      |  39 +++++-
+ src/libcamera/software_isp/software_isp.cpp   |   8 ++
+ 6 files changed, 181 insertions(+), 3 deletions(-)
+
+diff --git a/include/libcamera/internal/software_isp/software_isp.h b/include/libcamera/internal/software_isp/software_isp.h
+index 4f72dce..0102cc3 100644
+--- a/include/libcamera/internal/software_isp/software_isp.h
++++ b/include/libcamera/internal/software_isp/software_isp.h
+@@ -48,6 +48,7 @@ class SoftwareIsp : public Object
+ {
+ public:
+ 	SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
++		    const ControlInfoMap &lensControls,
+ 		    ControlInfoMap *ipaControls);
+ 	~SoftwareIsp();
+ 
+@@ -87,10 +88,12 @@ public:
+ 	Signal<uint32_t, uint32_t> ispStatsReady;
+ 	Signal<uint32_t, const ControlList &> metadataReady;
+ 	Signal<const ControlList &> setSensorControls;
++	Signal<const ControlList &> setLensControls;
+ 
+ private:
+ 	void saveIspParams();
+ 	void setSensorCtrls(const ControlList &sensorControls);
++	void setLensCtrls(const ControlList &lensControls);
+ 	void statsReady(uint32_t frame, uint32_t bufferId);
+ 	void inputReady(FrameBuffer *input);
+ 	void outputReady(FrameBuffer *output);
+diff --git a/include/libcamera/ipa/soft.mojom b/include/libcamera/ipa/soft.mojom
+index 77328c5..b391335 100644
+--- a/include/libcamera/ipa/soft.mojom
++++ b/include/libcamera/ipa/soft.mojom
+@@ -17,7 +17,8 @@ interface IPASoftInterface {
+ 	     libcamera.SharedFD fdStats,
+ 	     libcamera.SharedFD fdParams,
+ 	     libcamera.IPACameraSensorInfo sensorInfo,
+-	     libcamera.ControlInfoMap sensorControls)
++	     libcamera.ControlInfoMap sensorControls,
++	     libcamera.ControlInfoMap lensControls)
+ 		=> (int32 ret, libcamera.ControlInfoMap ipaControls, bool ccmEnabled);
+ 	start() => (int32 ret);
+ 	stop();
+@@ -33,6 +34,7 @@ interface IPASoftInterface {
+ 
+ interface IPASoftEventInterface {
+ 	setSensorControls(libcamera.ControlList sensorControls);
++	setLensControls(libcamera.ControlList lensControls);
+ 	setIspParams();
+ 	metadataReady(uint32 frame, libcamera.ControlList metadata);
+ };
+diff --git a/src/ipa/simple/ipa_context.h b/src/ipa/simple/ipa_context.h
+index 8ccfacb..a24ca41 100644
+--- a/src/ipa/simple/ipa_context.h
++++ b/src/ipa/simple/ipa_context.h
+@@ -33,6 +33,14 @@ struct IPASessionConfiguration {
+ 	struct {
+ 		std::optional<uint8_t> level;
+ 	} black;
++	struct {
++		/* True if the sensor has a focus actuator. */
++		bool present;
++		/* Range of the lens driver's V4L2_CID_FOCUS_ABSOLUTE control. */
++		int32_t min;
++		int32_t max;
++		int32_t def;
++	} lens;
+ };
+ 
+ struct IPAActiveState {
+@@ -42,6 +50,11 @@ struct IPAActiveState {
+ 		bool valid;
+ 	} agc;
+ 
++	struct {
++		/* Current lens driver position. */
++		int32_t position;
++	} lens;
++
+ 	struct {
+ 		uint8_t level;
+ 		int32_t lastExposure;
+diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
+index 629e1a3..a022ba9 100644
+--- a/src/ipa/simple/soft_simple.cpp
++++ b/src/ipa/simple/soft_simple.cpp
+@@ -5,6 +5,7 @@
+  * Simple Software Image Processing Algorithm module
+  */
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <stdint.h>
+ #include <sys/mman.h>
+@@ -56,6 +57,7 @@ public:
+ 		 const SharedFD &fdParams,
+ 		 const IPACameraSensorInfo &sensorInfo,
+ 		 const ControlInfoMap &sensorControls,
++		 const ControlInfoMap &lensControls,
+ 		 ControlInfoMap *ipaControls,
+ 		 bool *ccmEnabled) override;
+ 	int configure(const IPAConfigInfo &configInfo) override;
+@@ -73,11 +75,14 @@ protected:
+ 
+ private:
+ 	void updateExposure(double exposureMSV);
++	void setLensPosition(int32_t position);
+ 
+ 	DebayerParams *params_;
+ 	SwIspStats *stats_;
+ 	std::unique_ptr<CameraSensorHelper> camHelper_;
+ 	ControlInfoMap sensorInfoMap_;
++	ControlInfoMap lensInfoMap_;
++	int32_t lensPositionApplied_;
+ 
+ 	/* Local parameter storage */
+ 	struct IPAContext context_;
+@@ -96,6 +101,7 @@ int IPASoftSimple::init(const IPASettings &settings,
+ 			const SharedFD &fdParams,
+ 			const IPACameraSensorInfo &sensorInfo,
+ 			const ControlInfoMap &sensorControls,
++			const ControlInfoMap &lensControls,
+ 			ControlInfoMap *ipaControls,
+ 			bool *ccmEnabled)
+ {
+@@ -108,6 +114,26 @@ int IPASoftSimple::init(const IPASettings &settings,
+ 
+ 	context_.sensorInfo = sensorInfo;
+ 
++	/*
++	 * Remember the focus lens controls, if any, before the algorithms are
++	 * created so that they can declare their controls depending on the
++	 * lens presence. The LensPosition control maps the lens driver's
++	 * V4L2_CID_FOCUS_ABSOLUTE range linearly to [0.0, 1.0], with 0.0 the
++	 * far end (driver minimum, infinity for typical voice-coil actuators
++	 * that focus closest at the maximum current) and 1.0 the near end.
++	 * Without a calibration table mapping the driver position to dioptres,
++	 * a normalized scale keeps applications portable across actuators.
++	 */
++	lensInfoMap_ = lensControls;
++	auto lensIt = lensInfoMap_.find(V4L2_CID_FOCUS_ABSOLUTE);
++	if (lensIt != lensInfoMap_.end()) {
++		const ControlInfo &lensInfo = lensIt->second;
++		context_.configuration.lens.present = true;
++		context_.configuration.lens.min = lensInfo.min().get<int32_t>();
++		context_.configuration.lens.max = lensInfo.max().get<int32_t>();
++		context_.configuration.lens.def = lensInfo.def().get<int32_t>();
++	}
++
+ 	/* Load the tuning data file */
+ 	File file(settings.configurationFile);
+ 	if (!file.open(File::OpenModeFlag::ReadOnly)) {
+@@ -177,6 +203,10 @@ int IPASoftSimple::init(const IPASettings &settings,
+ 		stats_ = static_cast<SwIspStats *>(mem);
+ 	}
+ 
++	if (context_.configuration.lens.present)
++		context_.ctrlMap[&controls::LensPosition] =
++			ControlInfo(0.0f, 1.0f, 0.0f);
++
+ 	ControlInfoMap::Map ctrlMap = context_.ctrlMap;
+ 	*ipaControls = ControlInfoMap(std::move(ctrlMap), controls::controls);
+ 
+@@ -211,6 +241,30 @@ int IPASoftSimple::configure(const IPAConfigInfo &configInfo)
+ 	context_.activeState = {};
+ 	context_.frameContexts.clear();
+ 
++	/*
++	 * Restore the lens configuration (cleared by the context reset above)
++	 * from the lens controls parsed in init(), and move the lens to its
++	 * default position so that streaming starts from a known state.
++	 */
++	if (lensInfoMap_.find(V4L2_CID_FOCUS_ABSOLUTE) != lensInfoMap_.end()) {
++		const ControlInfo &lensInfo =
++			lensInfoMap_.find(V4L2_CID_FOCUS_ABSOLUTE)->second;
++		context_.configuration.lens.present = true;
++		context_.configuration.lens.min = lensInfo.min().get<int32_t>();
++		context_.configuration.lens.max = lensInfo.max().get<int32_t>();
++		context_.configuration.lens.def = lensInfo.def().get<int32_t>();
++
++		LOG(IPASoft, Info)
++			<< "Lens focus control "
++			<< context_.configuration.lens.min << "-"
++			<< context_.configuration.lens.max;
++	}
++
++	/* Applied with the first statistics: no IPA events before start(). */
++	lensPositionApplied_ = INT32_MIN;
++	if (context_.configuration.lens.present)
++		context_.activeState.lens.position = context_.configuration.lens.def;
++
+ 	context_.configuration.agc.lineDuration =
+ 		context_.sensorInfo.minLineLength * 1.0s / context_.sensorInfo.pixelRate;
+ 	context_.configuration.agc.exposureMin = exposureInfo.min().get<int32_t>();
+@@ -279,10 +333,52 @@ void IPASoftSimple::queueRequest(const uint32_t frame, const ControlList &contro
+ {
+ 	IPAFrameContext &frameContext = context_.frameContexts.alloc(frame);
+ 
++	/*
++	 * Apply the manual focus control directly, independently of any
++	 * algorithm: the Af algorithm may not be enabled in the tuning file,
++	 * and with AfModeManual the LensPosition control is the only way to
++	 * move the lens.
++	 */
++	const auto &lensPosition = controls.get(controls::LensPosition);
++	if (lensPosition.has_value() && context_.configuration.lens.present) {
++		const float pos = std::clamp(lensPosition.value(), 0.0f, 1.0f);
++		setLensPosition(context_.configuration.lens.min +
++				pos * (context_.configuration.lens.max -
++				       context_.configuration.lens.min));
++	}
++
+ 	for (const auto &algo : algorithms())
+ 		algo->queueRequest(context_, frame, frameContext, controls);
+ }
+ 
++/*
++ * Move the lens to a driver position. The position is clamped to the range
++ * reported by the lens driver, and recorded in the IPA context so that the
++ * Af algorithm knows which position the statistics correspond to. Moving
++ * to the position the lens is already at is a no-op.
++ */
++void IPASoftSimple::setLensPosition(int32_t position)
++{
++	if (!context_.configuration.lens.present)
++		return;
++
++	position = std::clamp(position,
++			      context_.configuration.lens.min,
++			      context_.configuration.lens.max);
++
++	if (position == lensPositionApplied_)
++		return;
++
++	context_.activeState.lens.position = position;
++	lensPositionApplied_ = position;
++
++	ControlList lensCtrls(lensInfoMap_);
++	lensCtrls.set(V4L2_CID_FOCUS_ABSOLUTE, position);
++	setLensControls.emit(lensCtrls);
++
++	LOG(IPASoft, Debug) << "Lens position set to " << position;
++}
++
+ void IPASoftSimple::computeParams(const uint32_t frame)
+ {
+ 	context_.activeState.combinedMatrix = Matrix<float, 3, 3>::identity();
+@@ -309,6 +405,27 @@ void IPASoftSimple::processStats(const uint32_t frame,
+ 	ControlList metadata(controls::controls);
+ 	for (const auto &algo : algorithms())
+ 		algo->process(context_, frame, frameContext, stats_, metadata);
++
++	/*
++	 * If an algorithm (Af) changed the desired lens position in
++	 * context.activeState.lens.position, apply it now. The lens controls
++	 * are not part of the delayed sensor controls as the actuator has no
++	 * per-frame semantics; the algorithm accounts for the settling time
++	 * itself.
++	 */
++	setLensPosition(context_.activeState.lens.position);
++
++	if (context_.configuration.lens.present) {
++		const int32_t range = context_.configuration.lens.max -
++				      context_.configuration.lens.min;
++		const float pos = range > 0
++			? static_cast<float>(context_.activeState.lens.position -
++					     context_.configuration.lens.min) /
++			  range
++			: 0.0f;
++		metadata.set(controls::LensPosition, pos);
++	}
++
+ 	metadataReady.emit(frame, metadata);
+ 
+ 	/* Sanity check */
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 716537d..b6a3a28 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -33,6 +33,7 @@
+ #include <libcamera/stream.h>
+ 
+ #include "libcamera/internal/camera.h"
++#include "libcamera/internal/camera_lens.h"
+ #include "libcamera/internal/camera_manager.h"
+ #include "libcamera/internal/camera_sensor.h"
+ #include "libcamera/internal/camera_sensor_properties.h"
+@@ -342,6 +343,7 @@ public:
+ 	 */
+ 	std::list<Entity> entities_;
+ 	std::unique_ptr<CameraSensor> sensor_;
++	CameraLens *lens_;
+ 	V4L2VideoDevice *video_;
+ 	V4L2Subdevice *frameStartEmitter_;
+ 
+@@ -373,6 +375,7 @@ private:
+ 	void ispStatsReady(uint32_t frame, uint32_t bufferId);
+ 	void metadataReady(uint32_t frame, const ControlList &metadata);
+ 	void setSensorControls(const ControlList &sensorControls);
++	void setLensControls(const ControlList &lensControls);
+ };
+ 
+ class SimpleCameraConfiguration : public CameraConfiguration
+@@ -470,7 +473,8 @@ private:
+ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+ 				   unsigned int numStreams,
+ 				   MediaEntity *sensor)
+-	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr)
++	: Camera::Private(pipe), streams_(numStreams), rawStream_(nullptr),
++	  lens_(nullptr)
+ {
+ 	/*
+ 	 * Find the shortest path from the camera sensor to a video capture
+@@ -566,6 +570,8 @@ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+ 	if (!sensor_)
+ 		return;
+ 
++	lens_ = sensor_->focusLens();
++
+ 	const CameraSensorProperties::SensorDelays &delays = sensor_->sensorDelays();
+ 	std::unordered_map<uint32_t, DelayedControls::ControlParams> params = {
+ 		{ V4L2_CID_ANALOGUE_GAIN, { delays.gainDelay, false } },
+@@ -616,7 +622,10 @@ int SimpleCameraData::init()
+ 	 * Instantiate Soft ISP if this is enabled for the given driver and no converter is used.
+ 	 */
+ 	if (!converter_ && pipe->swIspEnabled()) {
+-		swIsp_ = std::make_unique<SoftwareIsp>(pipe, sensor_.get(), &controlInfo_);
++		swIsp_ = std::make_unique<SoftwareIsp>(pipe, sensor_.get(),
++						       lens_ ? lens_->controls()
++							     : ControlInfoMap{},
++						       &controlInfo_);
+ 		if (!swIsp_->isValid()) {
+ 			LOG(SimplePipeline, Warning)
+ 				<< "Failed to create software ISP, disabling software debayering";
+@@ -627,6 +636,7 @@ int SimpleCameraData::init()
+ 			swIsp_->ispStatsReady.connect(this, &SimpleCameraData::ispStatsReady);
+ 			swIsp_->metadataReady.connect(this, &SimpleCameraData::metadataReady);
+ 			swIsp_->setSensorControls.connect(this, &SimpleCameraData::setSensorControls);
++			swIsp_->setLensControls.connect(this, &SimpleCameraData::setLensControls);
+ 		}
+ 	}
+ 
+@@ -665,6 +675,16 @@ int SimpleCameraData::init()
+ 
+ 	properties_ = sensor_->properties();
+ 
++	/*
++	 * The focus lens, if any, was found when the sensor was created. It is
++	 * kept open (and thus powered, as actuator drivers commonly gate their
++	 * supply on the subdev node being open) for the whole lifetime of the
++	 * camera.
++	 */
++	if (lens_)
++		LOG(SimplePipeline, Debug)
++			<< "Using focus lens '" << lens_->model() << "'";
++
+ 	/* Find the first subdev that can generate a frame start signal, if any. */
+ 	frameStartEmitter_ = nullptr;
+ 	for (const Entity &entity : entities_) {
+@@ -1059,6 +1079,21 @@ void SimpleCameraData::setSensorControls(const ControlList &sensorControls)
+ 	}
+ }
+ 
++/*
++ * Apply the lens position computed by the IPA. The lens subdev is not part
++ * of the pipeline entities_, so the controls are applied immediately; the
++ * actuator settles within a couple of frames, which the AF algorithm
++ * accounts for by skipping frames after each move.
++ */
++void SimpleCameraData::setLensControls(const ControlList &lensControls)
++{
++	if (!lens_ || !lensControls.contains(V4L2_CID_FOCUS_ABSOLUTE))
++		return;
++
++	const ControlValue &focusValue = lensControls.get(V4L2_CID_FOCUS_ABSOLUTE);
++	lens_->setFocusPosition(focusValue.get<int32_t>());
++}
++
+ /* Retrieve all source pads connected to a sink pad through active routes. */
+ std::vector<const MediaPad *> SimpleCameraData::routedSourcePads(MediaPad *sink)
+ {
+diff --git a/src/libcamera/software_isp/software_isp.cpp b/src/libcamera/software_isp/software_isp.cpp
+index c73a16c..a09593f 100644
+--- a/src/libcamera/software_isp/software_isp.cpp
++++ b/src/libcamera/software_isp/software_isp.cpp
+@@ -80,6 +80,7 @@ LOG_DEFINE_CATEGORY(SoftwareIsp)
+  * handler
+  */
+ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
++			 const ControlInfoMap &lensControls,
+ 			 ControlInfoMap *ipaControls)
+ 	: ispWorkerThread_("SWIspWorker"),
+ 	  dmaHeap_(DmaBufAllocator::DmaBufAllocatorFlag::CmaHeap |
+@@ -162,6 +163,7 @@ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
+ 			 sharedParams_.fd(),
+ 			 sensorInfo,
+ 			 sensor->controls(),
++			 lensControls,
+ 			 ipaControls,
+ 			 &ccmEnabled_);
+ 	if (ret) {
+@@ -176,6 +178,7 @@ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
+ 					    metadataReady.emit(frame, metadata);
+ 				    });
+ 	ipa_->setSensorControls.connect(this, &SoftwareIsp::setSensorCtrls);
++	ipa_->setLensControls.connect(this, &SoftwareIsp::setLensCtrls);
+ 
+ 	debayer_->moveToThread(&ispWorkerThread_);
+ }
+@@ -441,6 +444,11 @@ void SoftwareIsp::setSensorCtrls(const ControlList &sensorControls)
+ 	setSensorControls.emit(sensorControls);
+ }
+ 
++void SoftwareIsp::setLensCtrls(const ControlList &lensControls)
++{
++	setLensControls.emit(lensControls);
++}
++
+ void SoftwareIsp::statsReady(uint32_t frame, uint32_t bufferId)
+ {
+ 	ispStatsReady.emit(frame, bufferId);
+-- 
+2.52.0
+
