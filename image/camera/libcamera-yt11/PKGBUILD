@@ -1,0 +1,174 @@
+# libcamera rebuilt for the Lenovo Yoga Tab 11 (YT-J706F, MT6785).
+#
+# Based on the Arch Linux ARM PKGBUILD for libcamera 0.7.2-4
+# (https://github.com/archlinuxarm/PKGBUILDs, extra/libcamera/PKGBUILD).
+# Differences from the ALARM package:
+#   - libcamera-0.7.2-simple-mt6785.patch adds this tablet's media device
+#     driver name ("mtk-mt6785-seninf") to the simple pipeline handler's
+#     supportedDevices[] table with the software ISP enabled.
+#   - Only the simple pipeline and the soft IPA are built, and the heavy
+#     extras the tablet does not need (docs, GStreamer plugin, Python
+#     bindings, lc-compliance) are disabled so `makepkg -s` on the tablet
+#     pulls fewer build dependencies.
+#   - The ALARM libpisp make-dependency and its -D rpi-awb-nn override are
+#     dropped along with the rpi pipelines: no Raspberry Pi is involved.
+#   - arch is aarch64 and the test suite (needs CLONE_NEWUSER/CLONE_NEWNET
+#     in the build chroot) is skipped, as building happens directly on
+#     the tablet.
+
+pkgbase=libcamera
+pkgname=(
+  libcamera
+  libcamera-ipa
+  libcamera-tools
+)
+pkgver=0.7.2
+pkgrel=4.yt11.1
+pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
+arch=(aarch64)
+url="https://libcamera.org/"
+_url=https://git.libcamera.org/libcamera/libcamera.git
+license=(
+  Apache-2.0
+  CC0-1.0
+  'GPL-2.0-only WITH Linux-syscall-note'
+  GPL-2.0-or-later
+  LGPL-2.1-or-later
+  'GPL-2.0-or-later WITH Linux-syscall-note OR BSD-3-Clause'
+  'GPL-2.0-or-later WITH Linux-syscall-note OR MIT'
+)
+makedepends=(
+  cmake
+  git
+  libdrm
+  libgcc
+  libjpeg-turbo
+  libstdc++
+  libtiff
+  libyaml
+  libyuv
+  meson
+  python-jinja
+  python-ply
+  python-pyyaml
+  qt6-base
+  qt6-tools
+  sdl2
+  systemd
+)
+source=(
+  "git+$_url#tag=v$pkgver"
+  "$pkgbase-$pkgver-simple-mt6785.patch"
+)
+sha512sums=('SKIP'
+            'fa1ef152fe8f202085ef080869e52d617459d35f9e42b327da5f4feb7519934e8b28adc851f85615634bf6ba6c587b73cbcfb615a0a3b46bf74840ffda140c67')
+b2sums=('SKIP'
+        '3fa6d2f6e6eb9f22e7c28cbcab7901fd4c92e3de368301ade79eb48c944f3d42b934360cd83891aff17c264076e007f1d145dfead65eb06aecca39eed3f175ad')
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  cd $pkgbase
+  patch -Np1 < ../$pkgbase-$pkgver-simple-mt6785.patch
+
+  # add version, so that utils/gen-version.sh may rely on it
+  printf "%s\n" "$pkgver" > .tarball-version
+}
+
+build() {
+  local meson_options=(
+    -D pipelines=simple
+    -D ipas=simple
+    -D v4l2=enabled
+    -D test=false
+    -D documentation=disabled
+    -D gstreamer=disabled
+    -D pycamera=disabled
+    -D qcam=enabled
+    -D lc-compliance=disabled
+    -D rpi-awb-nn=disabled
+    -D softisp-gpu=auto
+  )
+
+  arch-meson $pkgbase build "${meson_options[@]}"
+  meson compile -C build
+}
+
+package_libcamera() {
+  depends=(
+    glibc
+    gnutls
+    libcamera-ipa
+    libelf
+    libgcc
+    libglvnd
+    libstdc++
+    libunwind
+    libyaml
+    libyuv
+    sh
+    systemd-libs libudev.so
+  )
+  optdepends=('libcamera-tools: for applications')
+  provides=(libcamera.so libcamera-base.so)
+
+  meson install -C build --destdir "$pkgdir"
+  install -vDm 644 $pkgbase/LICENSES/{BSD-3-Clause,Linux-syscall-note,MIT}.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+
+  (
+    cd "$pkgdir"
+    _pick $pkgbase-ipa usr/lib/libcamera/
+    _pick $pkgbase-tools usr/bin/{cam,libcamera-bug-report,qcam}
+  )
+}
+
+package_libcamera-ipa() {
+  pkgdesc+=" - signed IPA"
+  license+=(BSD-2-Clause CC-BY-SA-4.0)
+
+  depends=(
+    glibc
+    libcamera libcamera.so libcamera-base.so
+    libgcc
+    libstdc++
+  )
+  # stripping requires re-signing of IPA libs, so we do it manually
+  options=(!strip)
+
+  strip $pkgname/usr/lib/libcamera/*{.so,proxy}
+  for _lib in $pkgname/usr/lib/libcamera/*.so; do
+    $pkgbase/src/ipa/ipa-sign.sh "$(find $srcdir/build -type f -iname "*ipa-priv-key.pem")" "$_lib" "$_lib.sign"
+  done
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase/LICENSES/BSD-2-Clause.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_libcamera-tools() {
+  pkgdesc+=" - tools"
+  license+=(BSD-2-Clause)
+
+  depends=(
+    glibc
+    libcamera libcamera.so libcamera-base.so
+    libdrm
+    libevent libevent-2.1.so libevent_pthread-2.1.so
+    libgcc
+    libjpeg-turbo libjpeg.so
+    libstdc++
+    libtiff libtiff.so
+    libyaml
+    qt6-base
+    sdl2
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase/LICENSES/BSD-2-Clause.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
