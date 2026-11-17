@@ -172,3 +172,42 @@ Driver `drivers/media/platform/mediatek/mt6785-cam/` (kernel `yt11`
   measurable in image sharpness (9.4 to 9.5 on a noise-dominated dark
   scene at gain 2047): whether the dw9714 protocol moves this lens is
   not established. To redo in light, listening for the lens.
+
+## Unpacked layout as the driver default (2026-11-17)
+
+Kernel `yt11` c293f1f3c: the CAMSV node advertises only the unpacked
+10-bit Bayer formats (`BG10`, `GB10`, `BA10`, `RG10`), FMT_SEL 0x102 /
+PAK 5, bytes per line = 2 x width. Measured with
+`tools/camera/v4l2-capture.sh`, all frames delivered, none missed or torn:
+
+| Sensor | Mode | Frames | Bytes per frame |
+|---|---|---|---|
+| OV8856 | 640x480 (colour bars) | 20 of 20 | 614400 |
+| OV8856 | 1632x1224 (colour bars, then real scene) | 6 of 6, twice | 3995136 |
+| OV8856 | 3264x2448 (colour bars) | 4 of 4 | 15980544 |
+| S5K4H7 | 640x480 | 5 of 5 | 614400 |
+| S5K4H7 | 1632x1224 | 8 of 8 | 3995136 |
+
+Selecting the other sensor is one `media-ctl -l` call (the seninf drops
+the previous link itself). The `orientation` / `rotation` properties in
+the board DT (rear 90, front 270) are guesses, not measured.
+
+## libcamera (2026-11-17)
+
+`image/camera/libcamera-yt11/` built on the tablet (libcamera 0.7.2,
+simple pipeline, software ISP on the GPU through Panfrost, about 5
+minutes on the eight cores) and installed:
+
+- The media device's driver name must fit 15 characters: the default
+  (the platform driver's name) was cut to `mtk-mt6785-seni` and matched
+  nothing. The kernel now sets `mt6785-cam` (yt11, commit after
+  c293f1f3c) and the libcamera patch lists that name.
+- `cam -l` lists `Internal front camera` (S5K4H7) and `Internal back
+  camera` (OV8856).
+- `cam -c N --capture=8 --file=x.ppm` delivers 3260x2448 RGB frames from
+  both, about 30 frames per second with a few skipped sequence numbers.
+  The rear frame shows the room (dark and out of focus), upright as
+  saved; the front frame is nearly uniform in the dark.
+- libcamera warns that neither sensor driver implements the selection
+  (crop) targets and that it has no tuning file or sensor helper for
+  them: exposure and colour are uncalibrated defaults.

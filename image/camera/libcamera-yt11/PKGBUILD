@@ -23,7 +23,7 @@ pkgname=(
   libcamera-tools
 )
 pkgver=0.7.2
-pkgrel=4.yt11.1
+pkgrel=4.1
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
 arch=(aarch64)
 url="https://libcamera.org/"
@@ -61,9 +61,9 @@ source=(
   "$pkgbase-$pkgver-simple-mt6785.patch"
 )
 sha512sums=('SKIP'
-            'fa1ef152fe8f202085ef080869e52d617459d35f9e42b327da5f4feb7519934e8b28adc851f85615634bf6ba6c587b73cbcfb615a0a3b46bf74840ffda140c67')
+            '62fb7a6f50502e98ee2c5541ef1f4a04a713af3ed8eddf0d6b6471bf27146ef623f1fa3f0b9fa1b2c3ca08863c24eed9cebdbee089fb8c1fd1c681dec2d026ee')
 b2sums=('SKIP'
-        '3fa6d2f6e6eb9f22e7c28cbcab7901fd4c92e3de368301ade79eb48c944f3d42b934360cd83891aff17c264076e007f1d145dfead65eb06aecca39eed3f175ad')
+        '73f3399218201a8ce0358b8bc58ffeff57a5010a3cb6a48aa21f1509b2642a621cbacabfb34939b048d97760cd26fcd64b390ad0d525e16c4f020aa63ae4c62f')
 
 _pick() {
   local p="$1" f d; shift
@@ -96,6 +96,8 @@ build() {
     -D lc-compliance=disabled
     -D rpi-awb-nn=disabled
     -D softisp-gpu=auto
+    -D tracing=disabled
+    -D werror=false
   )
 
   arch-meson $pkgbase build "${meson_options[@]}"
@@ -159,7 +161,7 @@ package_libcamera-tools() {
     glibc
     libcamera libcamera.so libcamera-base.so
     libdrm
-    libevent libevent-2.1.so libevent_pthread-2.1.so
+    libevent
     libgcc
     libjpeg-turbo libjpeg.so
     libstdc++

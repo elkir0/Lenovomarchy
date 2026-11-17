@@ -4,7 +4,7 @@
  	{ "intel-ipu7", {}, true },
  	{ "j721e-csi2rx", {}, true },
  	{ "mtk-seninf", { { "mtk-mdp", 3 } }, false },
-+	{ "mtk-mt6785-seninf", {}, true },
++	{ "mt6785-cam", {}, true },
  	{ "mxc-isi", {}, false },
  	{ "qcom-camss", {}, true },
  	{ "sun6i-csi", {}, false },

@@ -1,5 +1,10 @@
 # T13: libcamera on top of the new MT6785 capture driver (research and packaging)
 
+> Correction, 2026-11-17: the media device driver name is cut to 15
+> characters, so `mtk-mt6785-seninf` below never matched. The kernel now
+> sets `mt6785-cam` and the patch lists it; built and run on the tablet,
+> see `docs/hardware/CAMERA.md` "libcamera".
+
 State at the time of writing: the tablet has a working V4L2 media-controller
 pipeline `ov8856 2-0036` -> `mtk-mt6785-seninf` -> `mtk-mt6785-camsv` ->
 `mtk-mt6785-camsv video` (`/dev/video0`), and `v4l2-ctl` streams 640x480

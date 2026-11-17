@@ -1,4 +1,4 @@
-# libcamera for the Yoga Tab 11 (MT6785 `mtk-mt6785-seninf` + software ISP)
+# libcamera for the Yoga Tab 11 (MT6785 `mt6785-cam` + software ISP)
 
 This directory rebuilds the Arch Linux ARM `libcamera` package (0.7.2-4,
 `extra/libcamera`) with one change: a patch that adds this tablet's media
@@ -25,7 +25,7 @@ show real pictures.
 `src/libcamera/pipeline/simple/simple.cpp` at tag `v0.7.2`:
 
 ```cpp
-{ "mtk-mt6785-seninf", {}, true },
+{ "mt6785-cam", {}, true },
 ```
 
 That is the media device driver name our kernel reports (the SENINF
@@ -49,9 +49,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.yt11.1-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.yt11.1-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.yt11.1-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.1-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.1-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.1-aarch64.pkg.tar.xz
 ```
 
 Notes:
@@ -81,7 +81,7 @@ first), but it is how the flag can be toggled later without a rebuild
 pipelines:
   simple:
     supported_devices:
-      - driver: mtk-mt6785-seninf
+      - driver: mt6785-cam
         software_isp: true
 ```
 
@@ -163,7 +163,7 @@ v4l2-ctl -d /dev/video0 --list-formats   # expect BG10/GB10/BA10/RG10
 
 ```sh
 curl -o simple.cpp 'https://gitlab.freedesktop.org/camera/libcamera/-/raw/v0.7.2/src/libcamera/pipeline/simple/simple.cpp'
-# add the mtk-mt6785-seninf line after the mtk-seninf entry
+# add the mt6785-cam line after the mtk-seninf entry
 diff -u simple.cpp simple.cpp.edited > libcamera-0.7.2-simple-mt6785.patch
 # fix the ---/+++ headers to a/... and b/... paths
 ```
