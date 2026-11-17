@@ -111,6 +111,23 @@ class I2CRdwrData(ctypes.Structure):
     ]
 
 
+def parse_again(value: str) -> int:
+    s = value.strip().lower()
+    if s.endswith('x'):
+        try:
+            raw = int(round(float(s[:-1]) * 128.0))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f'invalid again multiplier: {value!r}') from exc
+    else:
+        try:
+            raw = int(s, 0)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f'invalid again value: {value!r}') from exc
+    if raw < 128 or raw > 2047:
+        raise argparse.ArgumentTypeError(f'again {raw} out of range [128, 2047]')
+    return raw
+
+
 def parse_bus(value: str) -> str:
     if value.startswith('/dev/i2c-'):
         return value
@@ -389,6 +406,12 @@ def main() -> int:
     ap.add_argument('--power-mode', choices=('auto', 'probe', 'sysfs', 'none'), default='auto',
                     help='How to power the sensor before I2C config (default auto)')
     ap.add_argument('--testpat', action='store_true', help='Enable OV8856 internal color bars')
+    ap.add_argument('--exposure', type=lambda x: int(x, 0), default=None,
+                    help='OV8856 exposure in lines (0x3500..0x3502) applied before stream-on')
+    ap.add_argument('--again', type=parse_again, default=None,
+                    help='OV8856 analogue gain (128..2047 or Nx, 0x3508..0x3509) applied before stream-on')
+    ap.add_argument('--frames', type=int, default=1,
+                    help='Keep streaming for N frames and save the Nth frame (default 1)')
     ap.add_argument('--settle', type=lambda x: int(x, 0), default=15,
                     help='DPHY HS-settle register value (default 15)')
     ap.add_argument('--w', type=int, default=640, help='Frame width in pixels (default 640)')
@@ -400,6 +423,9 @@ def main() -> int:
     ap.add_argument('--out', default='/tmp/ov.raw', help='Output raw frame path (default /tmp/ov.raw)')
     ap.add_argument('--png', help='Optional PNG output path (converted via raw2png.py)')
     args = ap.parse_args()
+
+    if args.frames < 1:
+        ap.error('--frames must be >= 1')
 
     seninf = args.seninf if args.seninf is not None else CSI_TO_SENINF[args.csi_port]
     print(f'config: csi_port={args.csi_port} seninf={seninf} mux={args.mux} '
@@ -426,6 +452,16 @@ def main() -> int:
             for reg, val in ((0x5000, 0x57), (0x5001, 0x02), (0x5E00, 0x80)):
                 sw(fd, args.i2c_addr, reg, val)
             print('sensor test pattern: color bars enabled')
+        if args.exposure is not None:
+            exp20 = (args.exposure << 4) & 0xFFFFF
+            sw(fd, args.i2c_addr, 0x3500, (exp20 >> 16) & 0x0F)
+            sw(fd, args.i2c_addr, 0x3501, (exp20 >> 8) & 0xFF)
+            sw(fd, args.i2c_addr, 0x3502, exp20 & 0xFF)
+            print(f'ov8856 exposure = {args.exposure} lines (0x{exp20:05x})')
+        if args.again is not None:
+            sw(fd, args.i2c_addr, 0x3508, (args.again >> 8) & 0xFF)
+            sw(fd, args.i2c_addr, 0x3509, args.again & 0xFF)
+            print(f'ov8856 again = {args.again} (0x{args.again:04x}, {args.again / 128.0:.2f}x)')
 
         # 2. CAM power domain, LARB bypass, CMA buffer
         with open(DBG + '/power', 'w') as f:
@@ -458,10 +494,12 @@ def main() -> int:
         os.close(fd)
 
     time.sleep(0.3)
-    with open(DBG + '/fill', 'w') as f:
-        f.write('0xa5')
-    w('camsv', 0x110, 0x8001)  # FBC RCNT_INC
-    time.sleep(0.3)
+    for frame_idx in range(args.frames):
+        if frame_idx == args.frames - 1:
+            with open(DBG + '/fill', 'w') as f:
+                f.write('0xa5')
+        w('camsv', 0x110, 0x8001)  # FBC RCNT_INC
+        time.sleep(0.3 if frame_idx == args.frames - 1 else 0.1)
 
     # 5. Status report + frame save
     csi2 = 0xA00 + 0x1000 * seninf
