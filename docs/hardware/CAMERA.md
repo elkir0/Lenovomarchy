@@ -85,3 +85,22 @@ With the `mt6785-seninf-tm` / `mt6785-camsv-tm` modules and
   the test pattern gives a dark noisy frame (dark room, not yet checked
   in light). CAMSV0 INT_STATUS reads 0x0018048f and TG_FRMSIZE 640x481.
 - The S5K4H7 (cam1) path is not tried yet.
+
+## Frame layout and first photo (2026-11-16)
+
+- With `FMT_SEL` (CAMSV +0x514) = 0x101 and `PAK` (+0x54c) = 2, the values
+  taken from begonia, IMGO writes 12-bit fields (two pixels in three
+  bytes, the 10-bit sample shifted left by two): an 800-byte line then
+  holds only 533 of the 640 pixels.
+- With `FMT_SEL` = 0x102 and `PAK` = 1 and the line still sized for 10
+  bits (800 bytes for 640 pixels, 384000 bytes per frame), the frame is
+  complete: 10-bit samples packed as one continuous little-endian bit
+  stream per line (pixel k in bits 10k..10k+9). This is not the MIPI
+  RAW10 byte layout. Sized for 12 bits (960 bytes per line) the DMA stops
+  at half the buffer.
+- Decoded as BGGR, the OV8856 colour bars come out as clean vertical bars
+  (magenta, red, blue, black at 640x480) and a capture with exposure 1200
+  lines and analogue gain 2047 shows the room: the first photo from this
+  tablet on mainline (rear-facing camera = cam0, out of focus: the VCM
+  is not driven). Samples: `tools/camera/samples/*-le10.raw`.
+- `ov-cap.py --frames N` works since it re-arms FBC for each frame.

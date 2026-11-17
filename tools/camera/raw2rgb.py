@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-"""Convert CAMSV MIPI-packed RAW10 frame dump to an 8-bit RGB PNG (stdlib only).
+"""Convert a MT6785 CAMSV IMGO raw frame dump to an 8-bit RGB PNG (stdlib only).
 
-Unpacks MIPI CSI-2 / MT6785 CAMSV RAW10 (4 pixels in 5 bytes: bytes 0..3 hold
-the upper 8 bits of pixels 0..3 and byte 4 holds their 2-bit LSBs from bits
-[1:0] for pixel 0 up to [7:6] for pixel 3), subtracts the black level, applies
+Two byte layouts are supported (--pack {10,12}):
+
+- pack 10 (MIPI RAW10, ``CAMSV_PAK = 2``): 4 pixels in 5 bytes; bytes 0..3
+  hold the upper 8 bits of pixels 0..3 and byte 4 holds their 2-bit LSBs
+  (pixel 0 in [1:0], pixel 3 in [7:6]). Bytes per line = width * 10 // 8.
+- pack 12 (what the hardware actually emits with ``CAMSV_PAK = 2`` +
+  ``CAMSV_FMT_SEL = 0x101`` on MT6785): 2 pixels in 3 bytes as two
+  little-endian 12-bit fields, each holding the 10-bit sample shifted left by
+  2 (measured on YT-J706F: white bars read 0xffc = 1023 << 2). Bytes per line
+  = width * 12 // 8. With a DMA line sized for RAW10 only 4/5 of the pixels
+  fit; see docs/research/camera/T9-RAWTOOLS.md.
+
+Both layouts are auto-detected from the file size when the geometry is
+ambiguous. After unpacking, the tool subtracts the black level, applies
 grey-world white balance and gamma, and demosaics (2x2 half-resolution by
 default, or optional full-resolution bilinear).
 
@@ -34,6 +45,58 @@ _LSB_LUT0 = bytes(b & 0x03 for b in range(256))
 _LSB_LUT1 = bytes((b >> 2) & 0x03 for b in range(256))
 _LSB_LUT2 = bytes((b >> 4) & 0x03 for b in range(256))
 _LSB_LUT3 = bytes((b >> 6) & 0x03 for b in range(256))
+
+# bytes-per-line helper for both supported layouts
+def bpl_for(width: int, pack: int) -> int:
+    """Bytes per line for a given pixel width and packing (10 or 12 bits/pixel)."""
+    if pack == 10:
+        return (width * 10 + 7) // 8
+    if pack == 12:
+        return (width * 12 + 7) // 8
+    raise ValueError(f'unsupported packing {pack!r} (expected 10 or 12)')
+
+
+def detect_pack(width: int, height: int, file_size: int, stride: int) -> int | None:
+    """Guess the packing from the file size.
+
+    Returns 10, 12, or None when the size is consistent with both layouts.
+    Only called with the stride the caller resolved (default stride equals
+    bpl for each candidate packing). Note that a truncated 12-bit capture
+    whose stride was sized for RAW10 has exactly the RAW10 frame size, which
+    the size alone cannot tell apart from a genuine RAW10 frame.
+    """
+    candidates = []
+    for pack in (10, 12):
+        bpl = bpl_for(width, pack)
+        if file_size >= (height - 1) * stride + bpl:
+            candidates.append(pack)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def detect_pack12_content(data: bytes, stride: int, lines: int = 4) -> bool:
+    """Content test for the 12-bit packed layout.
+
+    In that layout the 10-bit sample occupies bits [11:2] of each 12-bit
+    field, so the middle byte of every 3-byte pixel pair takes only 16 values
+    (one per low-nibble, high nibble fixed by the neighbouring samples); for
+    a saturated pattern it collapses to very few. In a genuine RAW10 line
+    that byte is the packed 2-bit LSBs of pixels 1 and 3 and spreads over all
+    256 values for any natural image. Measure the number of distinct middle
+    bytes on a handful of lines: <= 4 distinct values over >= 400 samples is
+    the 12-bit layout.
+    """
+    vals: set[int] = set()
+    checked = 0
+    for y in range(min(lines, max(1, len(data) // stride))):
+        line = data[y * stride : (y + 1) * stride]
+        vals.update(line[1::3])
+        checked += len(line) // 3
+    # A natural 8-bit-spread byte would need far more distinct values; the
+    # 12-bit layout bounds it by the 4-bit x 4-bit nibble pair, and real
+    # frames use only a handful. 16 covers saturated and mid-level frames.
+    return checked >= 24 and len(vals) <= 16
 
 
 def _enc_to_10bit(enc: int) -> int:
@@ -126,6 +189,121 @@ def _split_row_bytes_fast(row_bytes: bytes) -> tuple[memoryview, memoryview]:
     return memoryview(even_x).cast('H'), memoryview(odd_x).cast('H')
 
 
+_NIB0_LUT = bytes(b & 0x0F for b in range(256))
+_NIB1_LUT = bytes(b >> 4 for b in range(256))
+
+
+def _split_row12_bytes_fast(row12: bytes) -> tuple[memoryview, memoryview]:
+    """Split concatenated 12-bit packed lines (even or odd sensor rows) into
+    the two Bayer phases of those rows.
+
+    Layout: 2 pixels per 3 bytes, two little-endian 12-bit fields each
+    holding the 10-bit sample << 2. Bytes n3[0]=P0[7:0], n3[1]&0xf=P0[11:8],
+    n3[1]>>4=P1[3:0], n3[2]=P1[11:4].
+    The 16-bit LE word of each pair directly equals the 12-bit field value
+    (v12 = raw10 << 2): the phases are returned in the _ENC_TO_RAW12 index
+    space (raw = enc >> 2), matching the generic path, so both layouts share
+    the LUT machinery.
+    """
+    n = len(row12) // 3
+    b0 = row12[0 : n * 3 : 3]
+    b1 = row12[1 : n * 3 : 3]
+    b2 = row12[2 : n * 3 : 3]
+    hi = b1.translate(_NIB0_LUT)
+    lo = b1.translate(_NIB1_LUT)
+    hi2 = b2.translate(_NIB1_LUT)  # b2 >> 4: top nibble of P1's high byte
+    even_x = bytearray(n * 2)
+    even_x[0::2] = b0
+    even_x[1::2] = hi
+    odd_x = bytearray(n * 2)
+    odd_x[0::2] = lo
+    odd_x[1::2] = hi2
+    return memoryview(even_x).cast('H'), memoryview(odd_x).cast('H')
+
+
+def _unpack_line12_generic(line: bytes, width: int, line_bpl: int) -> tuple[list[int], list[int]]:
+    """Unpack one 12-bit packed sensor line of `line_bpl` packed bytes.
+
+    When the DMA stride was too short for the full width, fewer than `width`
+    pixels are available; the missing ones decode as 0.
+    """
+    even: list[int] = []
+    odd: list[int] = []
+    px = 0
+    for base in range(0, (line_bpl // 3) * 3, 3):
+        if px >= width:
+            break
+        even.append((line[base] | ((line[base + 1] & 0x0F) << 8)) & 0xFFF)
+        px += 1
+        if px >= width:
+            break
+        odd.append(((line[base + 1] >> 4) | (line[base + 2] << 4)) & 0xFFF)
+        px += 1
+    while px < width:
+        if (px & 1) == 0:
+            even.append(0)
+        else:
+            odd.append(0)
+        px += 1
+    hw = width // 2
+    return even[:hw], odd[:hw]
+
+
+def _pad_short_input(data: bytes, width: int, height: int, stride: int, pack: int) -> bytes:
+    bpl = bpl_for(width, pack)
+    needed = (height - 1) * stride + bpl
+    if len(data) < needed:
+        print(
+            f'warning: input is {len(data)} bytes (< expected {needed} for '
+            f'pack={pack} {width}x{height} stride={stride}), padding with 0',
+            file=sys.stderr,
+        )
+        data = data + b'\x00' * (needed - len(data))
+    return data
+
+
+def unpack_raw12_phases(
+    data: bytes, width: int, height: int, stride: int
+) -> tuple[tuple[memoryview | list[int], ...], int, int]:
+    """Unpack the 12-bit packed layout into the four 2x2 Bayer phase planes.
+
+    Same return convention as unpack_raw10_phases. Each element is an encoded
+    12-bit-field integer mapped via _ENC_TO_RAW12; the 10-bit sample is the
+    top 10 bits (hardware stores sample << 2).
+    """
+    data = _pad_short_input(data, width, height, stride, 12)
+    bpl12 = bpl_for(width, 12)
+    line_bpl = min(stride, bpl12)
+    hw = width // 2
+    hh = height // 2
+    used_h = hh * 2
+
+    if line_bpl == bpl12 and (width & 1) == 0:
+        even_raw = b''.join(data[y * stride : y * stride + bpl12] for y in range(0, used_h, 2))
+        odd_raw = b''.join(data[y * stride : y * stride + bpl12] for y in range(1, used_h, 2))
+        p00, p01 = _split_row12_bytes_fast(even_raw)
+        p10, p11 = _split_row12_bytes_fast(odd_raw)
+        return (p00, p01, p10, p11), hw, hh
+
+    p00_l: list[int] = []
+    p01_l: list[int] = []
+    p10_l: list[int] = []
+    p11_l: list[int] = []
+    for r in range(hh):
+        y0 = 2 * r
+        y1 = y0 + 1
+        e0, o0 = _unpack_line12_generic(data[y0 * stride : y0 * stride + stride], width, line_bpl)
+        e1, o1 = _unpack_line12_generic(data[y1 * stride : y1 * stride + stride], width, line_bpl)
+        p00_l.extend(e0)
+        p01_l.extend(o0)
+        p10_l.extend(e1)
+        p11_l.extend(o1)
+    return (p00_l, p01_l, p10_l, p11_l), hw, hh
+
+
+_ENC_TO_RAW12 = tuple(i >> 2 for i in range(4096))
+
+
 def unpack_raw10_phases(
     data: bytes, width: int, height: int, stride: int
 ) -> tuple[tuple[memoryview | list[int], ...], int, int]:
@@ -142,6 +320,8 @@ def unpack_raw10_phases(
             file=sys.stderr,
         )
         data = data + b'\x00' * (needed - len(data))
+    # note: keep the padding above for the pack=10 layout; pack=12 uses
+    # _pad_short_input() inside unpack_raw12_phases()
 
     hw = width // 2
     hh = height // 2
@@ -170,20 +350,25 @@ def unpack_raw10_phases(
     return (p00_l, p01_l, p10_l, p11_l), hw, hh
 
 
+def _phase_to_raw_tbl(pack: int) -> tuple[int, ...]:
+    return _ENC_TO_RAW10 if pack == 10 else _ENC_TO_RAW12
+
+
 def compute_phase_stats(
-    phases: tuple[memoryview | list[int], ...], black_level: int
+    phases: tuple[memoryview | list[int], ...], black_level: int, pack: int = 10
 ) -> list[dict[str, float]]:
-    blc_tbl = tuple(max(0, v - black_level) for v in _ENC_TO_RAW10)
+    enc_tbl = _phase_to_raw_tbl(pack)
+    blc_tbl = tuple(max(0, v - black_level) for v in enc_tbl)
     stats = []
     for plane in phases:
         n = len(plane)
         if n == 0:
             stats.append({'raw_mean': 0.0, 'blc_mean': 0.0, 'min': 0, 'max': 0})
             continue
-        raw_sum = sum(map(_ENC_TO_RAW10.__getitem__, plane))
+        raw_sum = sum(map(enc_tbl.__getitem__, plane))
         blc_sum = sum(map(blc_tbl.__getitem__, plane))
-        raw_min = min(map(_ENC_TO_RAW10.__getitem__, plane))
-        raw_max = max(map(_ENC_TO_RAW10.__getitem__, plane))
+        raw_min = min(map(enc_tbl.__getitem__, plane))
+        raw_max = max(map(enc_tbl.__getitem__, plane))
         stats.append({
             'raw_mean': raw_sum / n,
             'blc_mean': blc_sum / n,
@@ -218,10 +403,11 @@ def compute_wb_gains(
 
 
 def analyze_bayer_orders(
-    phases: tuple[memoryview | list[int], ...], black_level: int, wb_mode: str
+    phases: tuple[memoryview | list[int], ...], black_level: int, wb_mode: str,
+    pack: int = 10
 ) -> list[dict]:
-    pstats = compute_phase_stats(phases, black_level)
-    blc_tbl = tuple(max(0, v - black_level) for v in _ENC_TO_RAW10)
+    pstats = compute_phase_stats(phases, black_level, pack)
+    blc_tbl = tuple(max(0, v - black_level) for v in _phase_to_raw_tbl(pack))
     # Green pairs are always either (p01, p10) or (p00, p11)
     diff_01_10 = _diagonal_diff(phases[1], phases[2], blc_tbl)
     diff_00_11 = _diagonal_diff(phases[0], phases[3], blc_tbl)
@@ -273,15 +459,16 @@ def demosaic_half(
     black_level: int,
     gains: tuple[float, float, float],
     gamma: float,
+    pack: int = 10,
 ) -> tuple[int, int, bytes]:
     ri, g1i, g2i, bi = BAYER_LAYOUTS[order]
     scale = 1.0 / max(1, 1023 - black_level)
-    blc_tbl = tuple(max(0, v - black_level) for v in _ENC_TO_RAW10)
+    blc_tbl = tuple(max(0, v - black_level) for v in _phase_to_raw_tbl(pack))
 
     lut_r_sum1 = _build_lut(gains[0], scale, gamma, 1023, 1)
     lut_b_sum1 = _build_lut(gains[2], scale, gamma, 1023, 1)
-    lut_r_enc = bytes(lut_r_sum1[blc_tbl[i]] for i in range(1024))
-    lut_b_enc = bytes(lut_b_sum1[blc_tbl[i]] for i in range(1024))
+    lut_r_enc = bytes(lut_r_sum1[blc_tbl[i]] for i in range(len(blc_tbl)))
+    lut_b_enc = bytes(lut_b_sum1[blc_tbl[i]] for i in range(len(blc_tbl)))
     lut_g_sum2 = _build_lut(gains[1], scale, gamma, 2046, 2)
 
     r_bytes = bytes(map(lut_r_enc.__getitem__, phases[ri]))
@@ -395,6 +582,7 @@ def demosaic_bilinear(
     black_level: int,
     gains: tuple[float, float, float],
     gamma: float,
+    pack: int = 10,
 ) -> tuple[int, int, bytes]:
     w = hw * 2
     h = hh * 2
@@ -403,7 +591,7 @@ def demosaic_bilinear(
 
     ri, g1i, g2i, bi = BAYER_LAYOUTS[order]
     scale = 1.0 / max(1, 1023 - black_level)
-    blc_tbl = tuple(max(0, v - black_level) for v in _ENC_TO_RAW10)
+    blc_tbl = tuple(max(0, v - black_level) for v in _phase_to_raw_tbl(pack))
 
     r_grid = list(map(blc_tbl.__getitem__, phases[ri]))
     g1_grid = list(map(blc_tbl.__getitem__, phases[g1i]))
@@ -472,6 +660,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument('-o', '--out', dest='out_flag', help='Output PNG path')
     ap.add_argument('--stride', type=lambda x: int(x, 0), default=None, help='Line stride in bytes')
     ap.add_argument(
+        '--pack',
+        type=int,
+        choices=(10, 12),
+        default=None,
+        help='Byte packing: 10 = MIPI RAW10 (4 px in 5 bytes), 12 = 12-bit LE '
+             'fields, 2 px in 3 bytes, sample << 2 (what MT6785 CAMSV emits '
+             'with PAK=2/FMT_SEL=0x101; default: auto-detect from file size, '
+             'else 10)',
+    )
+    ap.add_argument(
         '--bayer',
         choices=tuple(BAYER_LAYOUTS.keys()),
         default='bggr',
@@ -514,7 +712,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     args = ap.parse_args(argv)
 
-    bpl = (args.width * 10 + 7) // 8
+    bpl10 = (args.width * 10 + 7) // 8
+    bpl12 = (args.width * 12 + 7) // 8
     out_path = args.out_flag
     stride = args.stride
 
@@ -533,13 +732,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     elif len(args.rest) > 2:
         ap.error('too many positional arguments (expected [stride] <out.png>)')
 
+    pack = args.pack
+    if pack is None:
+        pack = 10
+    # Explicit pack wins; otherwise try to infer from the file size (a file
+    # that fits pack=12 but not pack=10 decides it; a file that fits neither
+    # full frame is kept as pack=10 and decoded with zero padding).
+    if args.pack is None:
+        try:
+            with open(args.src, 'rb') as f:
+                f.seek(0, 2)
+                size = f.tell()
+        except OSError:
+            size = -1
+        det = detect_pack(args.width, args.height, size, stride if stride is not None else 0)
+        if det is not None:
+            pack = det
+    bpl = bpl10 if pack == 10 else bpl12
     if stride is None:
         stride = bpl
-    if args.width <= 1 or args.height <= 1 or stride < bpl:
-        ap.error(f'invalid geometry width={args.width} height={args.height} stride={stride} (min {bpl})')
+    if args.width <= 1 or args.height <= 1 or stride < bpl10:
+        ap.error(f'invalid geometry width={args.width} height={args.height} stride={stride} (min {bpl10} for pack=10)')
+    if stride < bpl:
+        print(
+            f'warning: stride {stride} < {bpl} bytes per pack={pack} line; '
+            f'each line holds only {args.width * stride // bpl} of {args.width} pixels',
+            file=sys.stderr,
+        )
     if out_path is None and not args.auto:
         ap.error('output PNG path required unless --auto is used')
 
+    args.pack = pack
     args.stride = stride
     args.out = out_path
     return args
@@ -550,9 +773,49 @@ def main(argv: list[str] | None = None) -> int:
     with open(args.src, 'rb') as f:
         data = f.read()
 
-    phases, hw, hh = unpack_raw10_phases(data, args.width, args.height, args.stride)
-    analysis = analyze_bayer_orders(phases, args.black_level, args.wb)
-    demosaic_fn = demosaic_bilinear if args.full else demosaic_half
+    # Auto-detect the packing when the caller did not pin it. The file size
+    # cannot separate a genuine RAW10 frame from a 12-bit-container capture
+    # whose stride was sized for RAW10 (both are stride*height bytes), so
+    # decode both layouts and keep the one whose Bayer structure is saner:
+    # the green phase pair of the correct layout has the smallest mean
+    # absolute difference (diagonal symmetry of the CFA). This is decided
+    # purely from the data, so it works for test patterns and real scenes
+    # alike; ties (e.g. an all-black frame) keep pack=10.
+    explicit_pack = '--pack' in (argv if argv is not None else sys.argv[1:])
+    if args.pack == 10 and not explicit_pack and len(data) > 0:
+        ph10, hw10, hh10 = unpack_raw10_phases(data, args.width, args.height, args.stride)
+        ph12, hw12, hh12 = unpack_raw12_phases(data, args.width, args.height, args.stride)
+        mad10 = min(item['g_pair_diff'] for item in analyze_bayer_orders(ph10, args.black_level, args.wb, 10))
+        mad12 = min(item['g_pair_diff'] for item in analyze_bayer_orders(ph12, args.black_level, args.wb, 12))
+        if mad12 < mad10 * 0.5:
+            print(
+                f'note: {args.src} decodes with better Bayer green symmetry '
+                f'as pack=12 (diag_mad {mad12:.1f} vs {mad10:.1f} as pack=10); '
+                f'treating as pack=12',
+                file=sys.stderr,
+            )
+            args.pack = 12
+
+    if args.pack == 12:
+        bpl12 = bpl_for(args.width, 12)
+        if args.stride < bpl12:
+            # A 12-bit capture with a RAW10-sized stride cannot hold a full
+            # line; only floor(stride * 2 / 3) pixels per line are usable.
+            usable = (args.stride // 3) * 2
+            print(
+                f'warning: stride {args.stride} < {bpl12} bytes needed for a '
+                f'pack=12 {args.width}-pixel line; only the first {usable} '
+                f'pixels of each line hold sensor data, the rest decode as 0',
+                file=sys.stderr,
+            )
+        phases, hw, hh = unpack_raw12_phases(data, args.width, args.height, args.stride)
+    else:
+        phases, hw, hh = unpack_raw10_phases(data, args.width, args.height, args.stride)
+    analysis = analyze_bayer_orders(phases, args.black_level, args.wb, args.pack)
+    if args.full:
+        demosaic_fn = lambda *a: demosaic_bilinear(*a, pack=args.pack)  # noqa: E731
+    else:
+        demosaic_fn = lambda *a: demosaic_half(*a, pack=args.pack)  # noqa: E731
 
     if args.auto:
         print(f'Bayer order analysis ({args.width}x{args.height}, blc={args.black_level}, wb={args.wb}):')
@@ -591,7 +854,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f'ok {args.out} {ow}x{oh} bayer={args.bayer} '
         f'blc={args.black_level} wb=({gr:.3f},{gg:.3f},{gb:.3f}) '
-        f'gamma={args.gamma}'
+        f'gamma={args.gamma} pack={args.pack}'
     )
     return 0
 

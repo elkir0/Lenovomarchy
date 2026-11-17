@@ -4,7 +4,13 @@
 #
 # Ported from begonia camsv/cap1.sh. Requires root and mt6785-camsv-tm loaded.
 # Usage:
-#   sudo sh cap-tm.sh [-w WIDTH] [-l HEIGHT] [-o OUT_RAW] [-p OUT_PNG] [-n]
+#   sudo sh cap-tm.sh [-w WIDTH] [-l HEIGHT] [-k PACK] [-o OUT_RAW] [-p OUT_PNG] [-n]
+#
+# PACK=12 (default) configures the IMGO DMA for 12-bit containers (2 px / 3
+# bytes, 10-bit sample << 2), which is what the MT6785 packer emits for a
+# RAW10 sensor stream with FMT_SEL=0x102 / PAK=1 (see T9-RAWTOOLS.md); each
+# line is W*12/8 bytes. PACK=10 keeps the legacy assumption (MIPI RAW10,
+# FMT_SEL=0x101 / PAK=2, W*10/8 bytes per line) for comparison.
 
 set -eu
 
@@ -13,6 +19,7 @@ D=/sys/kernel/debug/camsv-tm
 
 W=${W:-640}
 L=${L:-480}
+PACK=${PACK:-12}
 OUT=${OUT:-/tmp/tm-frame.raw}
 PNG=${PNG:-}
 NO_PNG=0
@@ -20,19 +27,21 @@ FILL=${FILL:-0xa5}
 
 usage() {
 	cat <<EOF
-usage: $0 [-w WIDTH] [-l HEIGHT] [-o OUT_RAW] [-p OUT_PNG] [-n] [-h]
+usage: $0 [-w WIDTH] [-l HEIGHT] [-k PACK] [-o OUT_RAW] [-p OUT_PNG] [-n] [-h]
   -w WIDTH    frame width in pixels (default: 640)
   -l HEIGHT   frame height in lines (default: 480)
-  -o OUT_RAW  output raw RAW10 file (default: /tmp/tm-frame.raw)
+  -k PACK     bits per pixel containers: 10 or 12 (default: 12)
+  -o OUT_RAW  output raw file (default: /tmp/tm-frame.raw)
   -p OUT_PNG  output grayscale PNG file (default: <OUT_RAW>.png)
   -n          do not generate a PNG
 EOF
 }
 
-while getopts "w:l:o:p:nh" opt; do
+while getopts "w:l:k:o:p:nh" opt; do
 	case "$opt" in
 		w) W=$OPTARG ;;
 		l) L=$OPTARG ;;
+		k) PACK=$OPTARG ;;
 		o) OUT=$OPTARG ;;
 		p) PNG=$OPTARG ;;
 		n) NO_PNG=1 ;;
@@ -40,6 +49,12 @@ while getopts "w:l:o:p:nh" opt; do
 		*) usage >&2; exit 2 ;;
 	esac
 done
+
+case "$PACK" in
+	10) BPL=$((W * 10 / 8)); FMT=101; PAK=2 ;;
+	12) BPL=$((W * 12 / 8)); FMT=102; PAK=1 ;;
+	*) echo "error: PACK must be 10 or 12 (got $PACK)" >&2; exit 2 ;;
+esac
 
 if [ "$NO_PNG" -eq 0 ] && [ -z "$PNG" ]; then
 	case "$OUT" in
@@ -60,7 +75,6 @@ fi
 w() { printf '%s %s %s\n' "$1" "$2" "$3" > "$D/w"; }
 r() { printf '%s %s %s\n' "$1" "$2" "${3:-1}" > "$D/r"; cat "$D/r"; }
 
-BPL=$((W * 10 / 8))
 FRAME_BYTES=$((BPL * L))
 MIN_BUF=$((0x200000))
 if [ "$FRAME_BYTES" -gt "$MIN_BUF" ]; then
@@ -107,7 +121,7 @@ sleep 0.05
 r camsv 520
 w camsv 520 0
 
-# --- CAMSV0 TG window + IMGO DMA
+# --- CAMSV0 TG window + IMGO DMA (FMT/PAK/BPL follow PACK; env overrides stay)
 w camsv 238 "$(printf '%08x' $((W << 16)))"
 w camsv 23c "$(printf '%08x' $((L << 16)))"
 w camsv 20 "${PH#0x}"
@@ -116,8 +130,8 @@ w camsv 34 "$(printf '%x' "${YS:-$((L - 1))}")"
 w camsv 38 "$(printf '%x' $((BPL | ${STF:-0})))"
 w camsv 40 20002
 w camsv 44 20002
-w camsv 514 "${FMT:-101}"
-w camsv 54c "${PAK:-2}"
+w camsv 514 "$FMT"
+w camsv 54c "$PAK"
 w camsv 110 "${FBC:-8000}"
 
 # --- Enable CAMSV0 clocks, modules, interrupts, VF, TG
@@ -129,8 +143,10 @@ w camsv 234 1
 w camsv 230 "${SEN:-10001}"
 sleep 0.3
 
-# Refill marker before arming FBC RCNT_INC so the next full frame is isolated
+# Refill marker before arming FBC (FBC_EN then RCNT_INC) so the next full
+# frame is isolated; env FBC overrides the base value for experiments
 [ -n "$FILL" ] && printf '%s\n' "$FILL" > "$D/fill"
+w camsv 110 "$(printf '%x' "${FBC:-8000}")"
 w camsv 110 "$(printf '%x' $((0x${FBC:-8000} | 1)))"
 sleep 0.3
 
@@ -167,5 +183,5 @@ else:
 PY
 
 if [ "$NO_PNG" -eq 0 ]; then
-	python3 "$DIR/raw2png.py" "$OUT" "$W" "$L" "$BPL" "$PNG"
+	python3 "$DIR/raw2png.py" "$OUT" "$W" "$L" --pack "$PACK" "$BPL" "$PNG"
 fi

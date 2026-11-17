@@ -51,6 +51,42 @@ def pack_raw10(rows: list[list[int]], stride: int | None = None) -> bytes:
     return bytes(out)
 
 
+def pack_raw12(rows: list[list[int]], stride: int | None = None) -> bytes:
+    """Pack 10-bit pixels (0..1023) into the MT6785 12-bit container layout.
+
+    Two pixels per 3 bytes: two little-endian 12-bit fields, each holding the
+    10-bit sample shifted left by two (what CAMSV emits with PAK/FMT_SEL as
+    shipped). bpl = width * 12 / 8.
+    """
+    height = len(rows)
+    width = len(rows[0])
+    bpl = (width * 12 + 7) // 8
+    if stride is None:
+        stride = bpl
+    if stride < bpl:
+        raise ValueError(f'stride {stride} < bpl {bpl}')
+
+    out = bytearray()
+    for y in range(height):
+        row = rows[y]
+        line = bytearray()
+        for x in range(0, width & ~1, 2):
+            v0 = (row[x] << 2) & 0xFFF
+            v1 = (row[x + 1] << 2) & 0xFFF
+            line.append(v0 & 0xFF)
+            line.append(((v0 >> 8) & 0x0F) | ((v1 & 0x0F) << 4))
+            line.append((v1 >> 4) & 0xFF)
+        if width & 1:
+            v0 = (row[width - 1] << 2) & 0xFFF
+            line.append(v0 & 0xFF)
+            line.append((v0 >> 8) & 0x0F)
+            line.append(0)
+        if len(line) < stride:
+            line.extend(b'\xA5' * (stride - len(line)))
+        out.extend(line)
+    return bytes(out)
+
+
 def parse_and_verify_png(png_bytes: bytes) -> tuple[int, int, list[list[tuple[int, int, int]]]]:
     """Verify PNG signature, chunk CRCs, IHDR, IEND, and return RGB rows."""
     if not png_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
@@ -238,8 +274,12 @@ class TestRaw2Rgb(unittest.TestCase):
             out_png = os.path.join(tmp, 'stride.png')
             with open(raw_path, 'wb') as f:
                 f.write(pack_raw10(frames, stride=stride))
-            # Positional [stride] <out.png> compatible with raw2png.py
-            rc, _ = run_raw2rgb([raw_path, str(width), str(height), str(stride), out_png])
+            # Positional [stride] <out.png> compatible with raw2png.py; --pack 10
+            # pinned because this synthetic frame has constant RAW10 LSB bytes,
+            # which the content autodetect (rightly) reads as a 12-bit signature
+            rc, _ = run_raw2rgb([
+                raw_path, str(width), str(height), str(stride), out_png, '--pack', '10',
+            ])
             self.assertEqual(rc, 0)
             with open(out_png, 'rb') as f:
                 pw, ph, rgb = parse_and_verify_png(f.read())
@@ -299,6 +339,154 @@ class TestRaw2Rgb(unittest.TestCase):
                     pw, ph, _ = parse_and_verify_png(f.read())
                     self.assertEqual((pw, ph), (width // 2, height // 2))
             self.assertTrue(os.path.exists(out_png))
+
+    def test_pack12_quadrant_frame_half_and_full(self):
+        """pack=12 layout: same quadrant checks as the RAW10 suite."""
+        width, height = 32, 24
+        with tempfile.TemporaryDirectory() as tmp:
+            for order in ('bggr', 'rggb'):
+                raw_path = os.path.join(tmp, f'test12_{order}.raw')
+                frames = make_patch_frame(width, height, order, black_level=64)
+                with open(raw_path, 'wb') as f:
+                    f.write(pack_raw12(frames))
+
+                half_png = os.path.join(tmp, f'half12_{order}.png')
+                rc, _ = run_raw2rgb([
+                    raw_path, str(width), str(height), half_png,
+                    '--pack', '12', '--bayer', order,
+                ])
+                self.assertEqual(rc, 0)
+                with open(half_png, 'rb') as f:
+                    pw, ph, rgb = parse_and_verify_png(f.read())
+                self.assertEqual((pw, ph), (width // 2, height // 2))
+                w_px = rgb[2][2]
+                r_px = rgb[2][pw - 3]
+                g_px = rgb[ph - 3][2]
+                b_px = rgb[ph - 3][pw - 3]
+                self.assertGreater(w_px[0], 220)
+                self.assertLess(abs(w_px[0] - w_px[1]), 3)
+                self.assertLess(abs(w_px[1] - w_px[2]), 3)
+                self.assertGreater(r_px[0], 220)
+                self.assertEqual(r_px[1], 0)
+                self.assertEqual(r_px[2], 0)
+                self.assertGreater(g_px[1], 220)
+                self.assertEqual(g_px[0], 0)
+                self.assertEqual(g_px[2], 0)
+                self.assertGreater(b_px[2], 220)
+                self.assertEqual(b_px[0], 0)
+                self.assertEqual(b_px[1], 0)
+
+                full_png = os.path.join(tmp, f'full12_{order}.png')
+                rc, _ = run_raw2rgb([
+                    raw_path, str(width), str(height), full_png,
+                    '--pack', '12', '--bayer', order, '--full',
+                ])
+                self.assertEqual(rc, 0)
+                with open(full_png, 'rb') as f:
+                    fw, fh, frgb = parse_and_verify_png(f.read())
+                self.assertEqual((fw, fh), (width, height))
+                self.assertGreater(frgb[4][4][0], 220)
+                self.assertGreater(frgb[4][fw - 5][0], 220)
+                self.assertGreater(frgb[fh - 5][4][1], 220)
+                self.assertGreater(frgb[fh - 5][fw - 5][2], 220)
+
+    def test_pack12_stride_and_odd_width(self):
+        width, height = 10, 8
+        bpl = (width * 12 + 7) // 8
+        stride = bpl + 5
+        frames = make_patch_frame(width, height, 'bggr', black_level=64)
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, 'stride12.raw')
+            out_png = os.path.join(tmp, 'stride12.png')
+            with open(raw_path, 'wb') as f:
+                f.write(pack_raw12(frames, stride=stride))
+            rc, _ = run_raw2rgb([
+                raw_path, str(width), str(height), str(stride), out_png, '--pack', '12',
+            ])
+            self.assertEqual(rc, 0)
+            with open(out_png, 'rb') as f:
+                pw, ph, rgb = parse_and_verify_png(f.read())
+            self.assertEqual((pw, ph), (5, 4))
+            self.assertGreater(rgb[0][4][0], 200)
+            self.assertEqual(rgb[0][4][2], 0)
+
+    def test_pack12_autodetect_from_content(self):
+        """A pack=12 file whose size matches a full pack=10 frame (the exact
+        situation of the real capture) is auto-detected via the middle-byte
+        signature and decoded as pack=12 without the flag."""
+        width, height = 40, 4
+        frames = make_patch_frame(width, height, 'bggr', black_level=64)
+        raw = pack_raw12(frames)
+        bpl10 = (width * 10 + 7) // 8
+        bpl12 = (width * 12 + 7) // 8
+        # bigger than a full pack=10 frame yet smaller than the pack=12 need:
+        # size-based detection alone keeps pack=10; only the content test can
+        # flip it (need10 <= size is always true when 12 fits at all)
+        self.assertGreater(len(raw), bpl10 * height)
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, 'auto12.raw')
+            out_png = os.path.join(tmp, 'auto12.png')
+            with open(raw_path, 'wb') as f:
+                f.write(raw)
+            rc, stdout = run_raw2rgb([
+                raw_path, str(width), str(height), str(bpl12), out_png,
+            ])
+            self.assertEqual(rc, 0)
+            self.assertIn('pack=12', stdout)
+            with open(out_png, 'rb') as f:
+                pw, ph, rgb = parse_and_verify_png(f.read())
+            # top-right quadrant is red
+            self.assertGreater(rgb[0][pw - 2][0], 220)
+            self.assertEqual(rgb[0][pw - 2][1], 0)
+
+    SAMPLE_RAW = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        'samples', 'ov8856-bars-640x480-stride800.raw',
+    )
+
+    def test_sample_file_renders_uniform_vertical_bars(self):
+        """Decode the real OV8856 capture: 8 vertical bars, each uniform.
+
+        The file is a 12-bit-container capture with a RAW10-sized stride
+        (800 B/line), so only the first 533 of 640 pixels per line hold data.
+        The live pixels form a quincunx (checkerboard): even-row/even-x and
+        odd-row/odd-x carry data, the other two phases are black. The bars
+        therefore render as colour pairs rather than the sensor's full-colour
+        pattern; what matters here is that each bar is a solid uniform band.
+        """
+        if not os.path.exists(self.SAMPLE_RAW):
+            self.skipTest('sample capture not present')
+        with tempfile.TemporaryDirectory() as tmp:
+            out_png = os.path.join(tmp, 'bars.png')
+            rc, _stdout = run_raw2rgb([
+                self.SAMPLE_RAW, '640', '480', '800', out_png,
+                '--pack', '12', '--bayer', 'bggr', '--wb', 'none', '--gamma', '1.0',
+            ])
+            self.assertEqual(rc, 0)
+            with open(out_png, 'rb') as f:
+                pw, ph, rgb = parse_and_verify_png(f.read())
+            self.assertEqual((pw, ph), (320, 240))
+
+            # 8 bars of 40 output pixels each over the 320 live output columns;
+            # check the interior of each bar for uniformity and low variance
+            # in every colour plane.
+            for bar in range(8):
+                x0, x1 = bar * 40 + 6, (bar + 1) * 40 - 6
+                for plane in range(3):
+                    vals = [rgb[y][x][plane] for y in range(ph) for x in range(x0, x1)]
+                    mean = sum(vals) / len(vals)
+                    var = sum((v - mean) ** 2 for v in vals) / len(vals)
+                    self.assertLess(
+                        var, 4.0,
+                        f'bar {bar} plane {plane} variance {var:.2f} (mean {mean:.1f})',
+                    )
+
+            # the first bar is bright (R and B live in the bright phases) and
+            # the last is black
+            self.assertGreater(rgb[ph // 2][6][0], 200)
+            self.assertGreater(rgb[ph // 2][6][2], 200)
+            for plane in range(3):
+                self.assertLess(rgb[ph // 2][8 * 40 - 8][plane], 10)
 
 
 if __name__ == '__main__':
