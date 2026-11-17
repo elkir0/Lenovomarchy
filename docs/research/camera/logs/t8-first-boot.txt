@@ -1,0 +1,96 @@
+[    4.807310] [drm] Initialized panfrost 1.6.0 for 13040000.gpu on minor 0
+[    4.807337] Bluetooth: Core ver 2.22
+[    4.807370] NET: Registered PF_BLUETOOTH protocol family
+[    4.807374] Bluetooth: HCI device and connection manager initialized
+[    4.807381] Bluetooth: HCI socket layer initialized
+[    4.807386] Bluetooth: L2CAP socket layer initialized
+[    4.807392] Bluetooth: SCO socket layer initialized
+[    4.812316] cs35l41 0-0042: Subsystem ID: yt-j706f
+[    4.813768] cs35l41 0-0042: Cirrus Logic CS35L41 (35a40), Revision: B2
+[    4.816633] cs35l41 0-0043: supply VA not found, using dummy regulator
+[    4.825314] cs35l41 0-0043: supply VP not found, using dummy regulator
+[    4.833938] mt6359-sound mt6359-sound: mt6359_parse_dt() failed to read dmic-mode, use default (0)
+[    4.833966] mt6359-sound mt6359-sound: mt6359_parse_dt() failed to read mic-type-1, use default (0)
+[    4.833975] mt6359-sound mt6359-sound: mt6359_parse_dt() failed to read mic-type-2, use default (0)
+[    4.845123] cs35l41 0-0043: Subsystem ID: yt-j706f
+[    4.847869] cs35l41 0-0043: Cirrus Logic CS35L41 (35a40), Revision: B2
+[    4.850010] mt6785_mt6359 sound: audio-routing not found: using legacy probe
+[    4.850814] mt6785_mt6359 sound: speaker: 4 cs35l41 amp(s) on I2S1, Speaker link enabled
+[    4.851134] mtu3 11201000.usb: gadget (high-speed) pullup D-
+[    4.857241] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857275] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857293] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857304] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857322] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857332] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857350] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857360] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857459] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857472] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857489] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857500] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857521] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857532] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857550] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.857560] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.860605] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.860658] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.860690] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.860730] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x0000052c]
+[    4.861035] mtk-mt6785-seninf 1a040000.seninf: MT6785 SENINF registered (CSI ports 0-2 -> mux 2 -> CAMSV0)
+[    4.861661] mt6785-audio 11210000.clock-controller:audio-controller: ASoC error (-16): at soc_component_read_no_lock() on 11210000.clock-controller:audio-controller for register: [0x00000e40]
+[    4.889133] mt6785-audio 11210000.clock-controller:audio-controller: MTKAIFCAL ok=1 chosen_phase[0/1/2]=-1/-1/-1 phase_cycle[0/1/2]=0/0/0
+[    4.933835] ------------[ cut here ]------------
+[    4.933866] WARNING: drivers/media/mc/mc-entity.c:1145 at media_create_pad_link+0x288/0x2b4 [mc], CPU#3: (udev-worker)/392
+[    4.934068] CPU: 3 UID: 0 PID: 392 Comm: (udev-worker) Tainted: G         C          7.1.0-yt11+ #64 PREEMPT 
+[    4.934079] Tainted: [C]=CRAP
+[    4.934084] Hardware name: MT8789V/T (DT)
+[    4.934091] pstate: 60400009 (nZCv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[    4.934099] pc : media_create_pad_link+0x288/0x2b4 [mc]
+[    4.934125] lr : camsv_subdev_registered+0x12c/0x1c8 [mt6785_camsv]
+[    4.934147] sp : ffff800083433510
+[    4.934153] x29: ffff800083433510 x28: ffff80007a3c8678 x27: ffff80007a3c8604
+[    4.934166] x26: ffff0000cff10e58 x25: ffff80007a450110 x24: ffff0000d06b41f0
+[    4.934179] x23: ffff0000d06b4080 x22: ffff0000d06b48c8 x21: ffff0000cff10b40
+[    4.934191] x20: ffff0000d06b42b0 x19: ffff0000d06b40b0 x18: ffff8000833fd0d0
+[    4.934204] x17: 00000000b3f08ede x16: 00000000b3f08ede x15: 696c346f65646976
+[    4.934216] x14: 3d4d455453595342 x13: ffffffffffffffff x12: ffff0000c2296b00
+[    4.934228] x11: ffff0000cff109a0 x10: 0000000000000000 x9 : ffff80007a593944
+[    4.934240] x8 : 0000000000000000 x7 : 0000000000000000 x6 : 0000000000000000
+[    4.934252] x5 : 00000000ffffffff x4 : 0000000000000003 x3 : 0000000000000000
+[    4.934264] x2 : ffff0000d06b42b0 x1 : 0000000000000001 x0 : ffff0000d06b40b0
+[    4.934276] Call trace:
+[    4.934283]  media_create_pad_link+0x288/0x2b4 [mc] (P)
+[    4.934309]  camsv_subdev_registered+0x12c/0x1c8 [mt6785_camsv]
+[    4.934323]  __v4l2_device_register_subdev+0x13c/0x1b0 [videodev]
+[    4.934405]  v4l2_async_match_notify+0x54/0x320 [v4l2_async]
+[    4.934424]  __v4l2_async_register_subdev+0x178/0x30c [v4l2_async]
+[    4.934437]  camsv_probe+0x2f4/0x3cc [mt6785_camsv]
+[    4.934455]  platform_probe+0x84/0xcc
+---
+[    0.034468] /soc/i2c@11009000/camera-sensor@36: Fixed dependency cycle(s) with /soc/seninf@1a040000
+[    0.035555] /soc/seninf@1a040000: Fixed dependency cycle(s) with /soc/i2c@11009000/camera-sensor@36
+[    0.039783] /soc/i2c@11009000/camera-sensor@36: Fixed dependency cycle(s) with /soc/seninf@1a040000
+[    0.045693] /soc/i2c@11009000/camera-sensor@36: Fixed dependency cycle(s) with /soc/seninf@1a040000
+[    0.045744] /soc/seninf@1a040000: Fixed dependency cycle(s) with /soc/i2c@11009000/camera-sensor@36
+[    1.203929] /soc/seninf@1a040000: Fixed dependency cycle(s) with /soc/i2c@11009000/camera-sensor@36
+[    1.204177] /soc/i2c@11009000/camera-sensor@36: Fixed dependency cycle(s) with /soc/seninf@1a040000
+[   17.119115] i2c 2-0036: deferred probe pending: i2c: supplier regulator-vcamd not ready
+Media controller API version 7.1.0
+
+Media device information
+------------------------
+driver          mtk-mt6785-seni
+model           mtk-mt6785-cam
+bus info        platform:1a040000.seninf
+hw revision     0x0
+driver version  7.1.0
+
+Device topology
+- entity 1: mtk-mt6785-seninf (4 pads, 0 link, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+	pad0: SINK
+	pad1: SINK
+	pad2: SINK
+	pad3: SOURCE
+

@@ -104,3 +104,25 @@ With the `mt6785-seninf-tm` / `mt6785-camsv-tm` modules and
   tablet on mainline (rear-facing camera = cam0, out of focus: the VCM
   is not driven). Samples: `tools/camera/samples/*-le10.raw`.
 - `ov-cap.py --frames N` works since it re-arms FBC for each frame.
+
+## FBC and interrupts (2026-11-17)
+
+Measured with the V4L2 driver streaming the OV8856 at 640x480 (about 120
+frames per second) and `/dev/mem` pokes at CAMSV0:
+
+- `INT_EN` (+0x518) bit 31 switches `INT_STATUS` (+0x51c) from
+  read-to-clear to write-1-to-clear. Writing 0xffffffff there, as the
+  experiments did, leaves the level interrupt asserted for a handler that
+  only reads the status (about 570 000 interrupts per second). The vendor
+  value 0x001304b1 (bit 31 clear) gives one VS (bit 0), one SOF (bit 7)
+  and one PASS1_DON (bit 10) per frame.
+- `FBC_IMGO_CTL1` (+0x110) with FBC_EN (bit 15) and the low field at 1
+  writes exactly one frame, then drops every frame: `FBC_IMGO_CTL2`
+  (+0x114) reads 0xNN000001 with [31:24], the drop count, rising at the
+  frame rate. Turning FBC off and on, resetting the IMGO DMA, or writing
+  bits 8, 16 or 22 does not release it. So `ov-cap.py --frames N` only
+  ever stored its first frame.
+- With the low field at 2, 3 or 4 the DMA writes every frame: the drop
+  count freezes and CTL2[7:0] counts frames, with [23:16] one behind. The
+  low field is a buffer count, not the "RCNT_INC" strobe the begonia notes
+  took it for.

@@ -1,0 +1,83 @@
+[   44.247708] mtk-mt6785-camsv 1a050000.camsv: no SENINF connected
+[   44.247778] ------------[ cut here ]------------
+[   44.247785] WARNING: drivers/media/common/videobuf2/videobuf2-core.c:1797 at vb2_start_streaming+0x10c/0x190 [videobuf2_common], CPU#6: v4l2-ctl/2413
+[   44.247996] CPU: 6 UID: 0 PID: 2413 Comm: v4l2-ctl Not tainted 7.1.0-yt11+ #68 PREEMPT 
+[   44.248007] Hardware name: MT8789V/T (DT)
+[   44.248014] pstate: 80400009 (Nzcv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   44.248024] pc : vb2_start_streaming+0x10c/0x190 [videobuf2_common]
+[   44.248043] lr : vb2_start_streaming+0x88/0x190 [videobuf2_common]
+[   44.248061] sp : ffff800088e2bb80
+[   44.248067] x29: ffff800088e2bb80 x28: 0000000000000000 x27: 0000000000000000
+[   44.248081] x26: ffff0000f4d88a80 x25: ffff80007a429490 x24: ffff0000c9393780
+[   44.248094] x23: ffff0000c1e25908 x22: ffff0000c1e252f0 x21: ffff0000c1e25888
+[   44.248106] x20: ffff0000c1e25888 x19: ffff0000c1e257a8 x18: ffff800088d9d070
+[   44.248118] x17: 00000000c006287d x16: 00000000c006287d x15: 0000000000000004
+[   44.248131] x14: 0000000000000008 x13: 0000000a850ea9ee x12: 0000000000000010
+[   44.248144] x11: 0000000000000008 x10: ffff8000851638b8 x9 : 0000000000000080
+[   44.248156] x8 : 0000000000000004 x7 : 205d383037373432 x6 : 322e34342020205b
+[   44.248168] x5 : ffff8000820956c8 x4 : ffff800088e2b657 x3 : 0000000000000000
+[   44.248180] x2 : 0000000000000000 x1 : 0000000000000000 x0 : 00000000ffffffbd
+[   44.248193] Call trace:
+[   44.248199]  vb2_start_streaming+0x10c/0x190 [videobuf2_common] (P)
+[   44.248219]  vb2_core_streamon+0x12c/0x1cc [videobuf2_common]
+[   44.248237]  vb2_ioctl_streamon+0x6c/0xa8 [videobuf2_v4l2]
+[   44.248254]  v4l_streamon+0x48/0x5c [videodev]
+[   44.248324]  __video_do_ioctl+0x388/0x3ec [videodev]
+[   44.248386]  video_usercopy+0x384/0x668 [videodev]
+[   44.248445]  video_ioctl2+0x28/0x3c [videodev]
+[   44.248505]  v4l2_ioctl+0x74/0x8c [videodev]
+[   44.248564]  __arm64_sys_ioctl+0xb0/0x108
+[   44.248578]  invoke_syscall+0x70/0x124
+[   44.248591]  el0_svc_common+0x9c/0xf0
+[   44.248602]  do_el0_svc+0x2c/0x3c
+[   44.248613]  el0_svc+0x44/0xa4
+[   44.248623]  el0t_64_sync_handler+0x8c/0x138
+[   44.248633]  el0t_64_sync+0x1a0/0x1a4
+[   44.248643] ---[ end trace 0000000000000000 ]---
+--- media-ctl -p
+Media controller API version 7.1.0
+
+Media device information
+------------------------
+driver          mtk-mt6785-seni
+model           mtk-mt6785-cam
+bus info        platform:1a040000.seninf
+hw revision     0x0
+driver version  7.1.0
+
+Device topology
+- entity 1: mtk-mt6785-seninf (4 pads, 1 link, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev0
+	pad0: SINK
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+	pad1: SINK
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+		<- "ov8856 2-0036":0 [ENABLED,IMMUTABLE]
+	pad2: SINK
+		[stream:0 fmt:SGRBG10_1X10/1640x1232 field:none colorspace:srgb]
+	pad3: SOURCE
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+
+- entity 6: ov8856 2-0036 (1 pad, 1 link, 0 routes)
+            type V4L2 subdev subtype Sensor flags 0
+            device node name /dev/v4l-subdev1
+	pad0: SOURCE
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+		-> "mtk-mt6785-seninf":1 [ENABLED,IMMUTABLE]
+
+- entity 10: mtk-mt6785-camsv (2 pads, 1 link, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev2
+	pad0: SINK
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+	pad1: SOURCE
+		[stream:0 fmt:SBGGR10_1X10/640x480 field:none]
+		-> "mtk-mt6785-camsv":0 [ENABLED,IMMUTABLE]
+
+- entity 13: mtk-mt6785-camsv (1 pad, 1 link)
+             type Node subtype V4L flags 0
+             device node name /dev/video0
+	pad0: SINK
+		<- "mtk-mt6785-camsv":1 [ENABLED,IMMUTABLE]
+
