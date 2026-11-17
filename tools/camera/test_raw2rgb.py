@@ -84,6 +84,33 @@ def pack_raw10(rows: list[list[int]], stride: int | None = None) -> bytes:
     return bytes(out)
 
 
+def pack_u16(rows: list[list[int]], stride: int | None = None, high: bool = False) -> bytes:
+    """Pack 10-bit pixels into 16-bit LE containers, one per pixel.
+
+    high=False puts the sample in the low 10 bits (the hoped-for CAMSV
+    layout-sweep output, what libcamera reads as SBGGR10); high=True puts
+    it in the high 10 bits (MSB-justified, sample << 6).
+    """
+    height = len(rows)
+    width = len(rows[0])
+    bpl = width * 2
+    if stride is None:
+        stride = bpl
+    if stride < bpl:
+        raise ValueError(f'stride {stride} < bpl {bpl}')
+    out = bytearray()
+    for y in range(height):
+        line = bytearray()
+        for x in range(width):
+            v = rows[y][x] & 0x3FF
+            word = (v << 6) & 0xFFFF if high else v
+            line += word.to_bytes(2, 'little')
+        if len(line) < stride:
+            line.extend(b'\xA5' * (stride - len(line)))
+        out.extend(line)
+    return bytes(out)
+
+
 def pack_p12(rows: list[list[int]], stride: int | None = None) -> bytes:
     """Pack 10-bit pixels into the MT6785 p12 container layout.
 
@@ -516,6 +543,129 @@ class TestP12(unittest.TestCase):
             self.assertEqual((pw, ph), (5, 4))
             self.assertGreater(rgb[0][4][0], 200)
             self.assertEqual(rgb[0][4][2], 0)
+
+
+class TestU16(unittest.TestCase):
+    """The u16/u16h layout-sweep candidate decodes (16-bit LE containers)."""
+
+    def test_u16_quadrant_frame_half(self):
+        # Sample in the LOW 10 bits: the layout libcamera's soft ISP reads
+        # as SBGGR10, i.e. the target of tools/camera/layout-sweep.sh.
+        width, height = 32, 24
+        with tempfile.TemporaryDirectory() as tmp:
+            for order in ('bggr', 'rggb'):
+                raw_path = os.path.join(tmp, f'testu16_{order}.raw')
+                frames = make_patch_frame(width, height, order, black_level=64)
+                with open(raw_path, 'wb') as f:
+                    f.write(pack_u16(frames))
+                half_png = os.path.join(tmp, f'halfu16_{order}.png')
+                rc, _ = run_raw2rgb([
+                    raw_path, str(width), str(height), half_png,
+                    '--layout', 'u16', '--bayer', order,
+                ])
+                self.assertEqual(rc, 0)
+                with open(half_png, 'rb') as f:
+                    pw, ph, rgb = parse_and_verify_png(f.read())
+                self.assertEqual((pw, ph), (width // 2, height // 2))
+                w_px = rgb[2][2]
+                r_px = rgb[2][pw - 3]
+                g_px = rgb[ph - 3][2]
+                b_px = rgb[ph - 3][pw - 3]
+                self.assertGreater(w_px[0], 220)
+                self.assertLess(abs(w_px[0] - w_px[1]), 3)
+                self.assertLess(abs(w_px[1] - w_px[2]), 3)
+                self.assertGreater(r_px[0], 220)
+                self.assertEqual(r_px[1], 0)
+                self.assertEqual(r_px[2], 0)
+                self.assertGreater(g_px[1], 220)
+                self.assertEqual(g_px[0], 0)
+                self.assertEqual(g_px[2], 0)
+                self.assertGreater(b_px[2], 220)
+                self.assertEqual(b_px[0], 0)
+                self.assertEqual(b_px[1], 0)
+
+    def test_u16h_high_bits(self):
+        # Same container, sample MSB-justified (>> 6): --layout u16h.
+        width, height = 16, 12
+        frames = make_patch_frame(width, height, 'bggr', black_level=64)
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, 'u16h.raw')
+            half_png = os.path.join(tmp, 'u16h.png')
+            with open(raw_path, 'wb') as f:
+                f.write(pack_u16(frames, high=True))
+            rc, _ = run_raw2rgb([
+                raw_path, str(width), str(height), half_png,
+                '--layout', 'u16h', '--bayer', 'bggr',
+            ])
+            self.assertEqual(rc, 0)
+            with open(half_png, 'rb') as f:
+                pw, ph, rgb = parse_and_verify_png(f.read())
+            self.assertEqual((pw, ph), (width // 2, height // 2))
+            # top-left white quadrant stays bright, top-right red-only
+            self.assertGreater(rgb[1][1][0], 220)
+            self.assertGreater(rgb[1][pw - 2][0], 220)
+            self.assertEqual(rgb[1][pw - 2][1], 0)
+            self.assertEqual(rgb[1][pw - 2][2], 0)
+
+    def test_u16_stride_and_odd_width(self):
+        # 10-px frame with padded stride exercises the generic decoder path
+        # boundaries (u16 has no width constraint, but the stride padding
+        # must be skipped).
+        width, height = 10, 8
+        bpl = width * 2
+        stride = bpl + 6
+        frames = make_patch_frame(width, height, 'bggr', black_level=64)
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, 'strideu16.raw')
+            out_png = os.path.join(tmp, 'strideu16.png')
+            with open(raw_path, 'wb') as f:
+                f.write(pack_u16(frames, stride=stride))
+            rc, _ = run_raw2rgb([
+                raw_path, str(width), str(height), str(stride), out_png,
+                '--layout', 'u16',
+            ])
+            self.assertEqual(rc, 0)
+            with open(out_png, 'rb') as f:
+                pw, ph, rgb = parse_and_verify_png(f.read())
+            self.assertEqual((pw, ph), (5, 4))
+            self.assertGreater(rgb[0][4][0], 200)
+            self.assertEqual(rgb[0][4][2], 0)
+
+    def test_u16_lsb_precision(self):
+        # 10-bit LSBs must survive the container (values 256 vs 259).
+        width, height = 8, 8
+        rows = [[256 if x < 4 else 259 for x in range(width)] for _ in range(height)]
+        data = pack_u16(rows)
+        phases, hw, hh = raw2rgb.unpack_phases(data, width, height, width * 2, 'u16')
+        tbl = raw2rgb._phase_to_raw_tbl('u16')
+        flat = [tbl[w] for plane in phases for w in (plane[0], plane[-1])]
+        self.assertEqual(set(flat), {256, 259})
+
+    def test_u16_detect_by_size(self):
+        # A full u16 frame (width * 2 B/line) is larger than any 10-bit
+        # frame of the same geometry, so the file size rules those out.
+        # u16 and u16h share the byte geometry: the content score cannot
+        # separate the two justifications (a wrongly-justified decode is
+        # near-flat, which scores as very plausible), so accept either —
+        # the sweep script always pins --layout.
+        width, height = 64, 16
+        rows = self._gradient_rows(width, height)
+        raw = pack_u16(rows)
+        self.assertEqual(len(raw), width * 2 * height)
+        layout, _ = raw2rgb.detect_layout(raw, width, height)
+        self.assertIn(layout, ('u16', 'u16h'))
+
+    def _gradient_rows(self, width, height, seed=5, black=64):
+        import random
+        rnd = random.Random(seed)
+        rows = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                base = black + (x * 400) // width + (y * 300) // height
+                row.append(max(0, min(1023, base + rnd.randrange(6))))
+            rows.append(row)
+        return rows
 
 
 class TestSamples(unittest.TestCase):

@@ -152,3 +152,23 @@ Driver `drivers/media/platform/mediatek/mt6785-cam/` (kernel `yt11`
 - Open: frames are a little-endian 10-bit bit stream exposed as `S*10P`
   (libcamera's software ISP cannot read it), the autofocus VCM at 0x0c is
   not driven, LARB MMU is bypassed, no picture has been taken in light.
+
+## Standard 16-bit layout and autofocus actuator (2026-11-17)
+
+- Packer sweep at 640x480 with the driver's `fmt_sel` / `pak` /
+  `bytes_per_px_x8` parameters (OV8856 colour bars): `FMT_SEL` 0x102 with
+  `PAK` 5 (PAK 1 plus bit 2) and two bytes per pixel writes each sample
+  in a little-endian 16-bit word, value in the low 10 bits
+  (`ff 03 00 00 ff 03 ...` on a bar line): the standard unpacked V4L2
+  Bayer layout. `PAK` 0, 1, 2, 3 with a 2-byte line, bit 24 of FMT_SEL,
+  and FMT_SEL 0x100, 0x101, 0x103 delivered no complete frame; `PAK` 1
+  with a 10-bit line is the bit-stream layout above.
+- A 1632x1224 real scene captured that way (bytes per line 3264, 6 of 6
+  frames) decodes correctly with `raw2rgb.py --layout u16`.
+- Autofocus: with the `dw9714` driver bound at 0x0c on i2c2 and its
+  subdev held open (which powers `vcamaf`, GPIO197) the actuator ACKs.
+  Register reads return 0x00 except 0x60 at registers 0x02 and 0x05.
+  Sweeping `focus_absolute` 0..1023 during capture changed nothing
+  measurable in image sharpness (9.4 to 9.5 on a noise-dominated dark
+  scene at gain 2047): whether the dw9714 protocol moves this lens is
+  not established. To redo in light, listening for the lens.

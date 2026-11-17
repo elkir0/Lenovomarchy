@@ -1,5 +1,24 @@
 # T9: Userspace RAW Conversion and OV8856 Exposure/Gain Tools
 
+## Corrections (2026-11-17)
+
+Two statements below were superseded by measurements on the unit (see
+`docs/hardware/CAMERA.md` "FBC and interrupts" and
+`docs/research/camera/T8-V4L2.md` sections 0g-0i):
+
+- The "multi-frame note" in section 2.1 is wrong about the cause and the
+  fix: there is no "RCNT_INC" strobe to re-arm.  The FBC CTL1 low field
+  is a compare value against the written-frame count; re-arming
+  `FBC_EN -> RCNT_INC` "worked" only because each re-arm re-created the
+  fresh-FBC state that lets exactly ONE more frame through.  `ov-cap.py
+  --frames N` therefore never captured more than its first frame.
+  Multi-frame capture works in the V4L2 driver
+  (`tools/camera/v4l2-capture.sh`), which keeps the compare value ahead
+  of the count at every frame end.
+- Where this document says "RAW10", read "10-bit raw": the byte layout
+  is the le10 bit stream described in section 0, not MIPI RAW10 (the
+  `raw10` layout exists in `raw2rgb.py` only as a reference decoder).
+
 Python 3 standard-library-only tools under `tools/camera/` for turning MT6785 CAMSV0 raw captures from the OmniVision OV8856 (`cam0`) into viewable RGB PNGs and tuning sensor exposure/gain over `/dev/i2c-N`. No third-party packages (`numpy`, `PIL`) are required.
 
 ## 0. The real IMGO byte layout (measured 2026-11-16)

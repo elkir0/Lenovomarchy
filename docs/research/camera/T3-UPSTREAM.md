@@ -1,5 +1,23 @@
 # Task T3: Upstream Research — MediaTek Camera Receivers, libcamera SoftISP, and Sensors for MT6785 (YT-J706F)
 
+## Corrections (2026-11-17)
+
+Two register readings below were corrected by measurements on this
+tablet (see `docs/hardware/CAMERA.md` "FBC and interrupts" and
+`docs/research/camera/T8-V4L2.md` sections 0g-0i):
+
+- The MT6785 FBC `FBC_IMGO_CTL1` low bit (`0x1`) is **not** "RCNT_INC"
+  and the suggested porting recipe "write `0x8000` then `0x8001` per
+  queued buffer" (section 2 register-mapping table, section on
+  `mtk_camsv_fbc_*`) is wrong for this silicon: the low 6-bit field is a
+  compare value against the written-frame count (`CTL2[6:0]`); with 1
+  the DMA stops after one frame and drops the rest.  A free-running DMA
+  needs the compare value kept ahead of the count, not a strobe.
+- The frame data this pipeline captures is **not** MIPI RAW10: with the
+  measured `FMT_SEL = 0x102 / PAK = 1` each line is a continuous
+  little-endian 10-bit bit stream ("le10"), same size, different bit
+  order.  Mentions of "RAW10" below should be read as "10-bit raw".
+
 This document surveys the upstream Linux kernel and `libcamera` status for bringing up the cameras on the Lenovo Yoga Tab 11 (`YT-J706F`, MediaTek MT6785) on mainline Linux 7.1, cross-referenced against the MT6785 hardware findings on Xiaomi Redmi Note 8 Pro (`begonia`) in [NOTES.md](file:///Users/anthony/dev/Lenovomarchy/src/begonia-ftp/camera/NOTES.md) and the tablet's stock DT inventory in [CAMERA.md](file:///Users/anthony/dev/Lenovomarchy/docs/hardware/CAMERA.md) and [BOARD.md](file:///Users/anthony/dev/Lenovomarchy/docs/hardware/BOARD.md).
 
 ---

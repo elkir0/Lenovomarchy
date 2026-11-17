@@ -1,5 +1,29 @@
 # T2: SENINF Test Model and CAMSV0 Frame Capture (`mt6785-seninf-tm`, `mt6785-camsv-tm`)
 
+## Corrections (2026-11-17)
+
+Later measurements on the unit supersede three readings this document
+carries from the begonia notes; see `docs/hardware/CAMERA.md`
+("Frame layout and first photo", "FBC and interrupts") and
+`docs/research/camera/T8-V4L2.md` (sections 0g-0i) for what was actually
+measured:
+
+- The FBC `FBC_IMGO_CTL1` low bit is **not** an "RCNT_INC" release
+  strobe (section 4 register table, section 5 failure modes): it is a
+  compare value against the count of frames written (`CTL2[6:0]`).  With
+  1 the DMA writes exactly one frame per stream and drops the rest;
+  keeping the compare value ahead of the count makes the DMA
+  free-running.  No release mechanism exists or is needed.
+- `FMT_SEL = 0x101 / PAK = 2` does **not** produce MIPI RAW10 on this
+  board: it writes 12-bit containers (2 px / 3 bytes, sample << 2) and
+  truncates lines to 2/3 of the pixels at a 10-bit stride.  The
+  complete-frame layout is `FMT_SEL = 0x102 / PAK = 1` with the line
+  sized for 10 bits: a continuous little-endian 10-bit bit stream per
+  line ("le10"), which shares only its size with MIPI RAW10.
+- Consequently "RAW10 frame" below means "10-bit frame", not the MIPI
+  RAW10 byte layout; decode captures with
+  `tools/camera/raw2rgb.py --layout le10`.
+
 Port of the MT6785 M2 bring-up experiments from Xiaomi `begonia`
 (`src/begonia-ftp/camera/`) to the Lenovo Yoga Tab 11 (`YT-J706F`) on Linux 7.1.
 Covers two stages:

@@ -1,5 +1,22 @@
 # Mainline Gap Analysis for YT-J706F Camera Bring-up (MT6785 / Kernel 7.1)
 
+## Corrections (2026-11-17)
+
+Two register readings in the CAMSV table below (section on CAMSV
+registers) were corrected by measurements on the unit; see
+`docs/hardware/CAMERA.md` ("Frame layout and first photo", "FBC and
+interrupts") and `docs/research/camera/T8-V4L2.md` sections 0g-0i:
+
+- `FBC_IMGO_CTL1` `|= 1` is **not** an "RCNT_INC" release: the low 6-bit
+  field is a compare value against the written-frame count
+  (`CTL2[6:0]`), and `CTL2[31:24]` is a drop counter, not a frame
+  counter.  Writing `0x8001` yields exactly one frame per stream; the
+  DMA runs free while the compare value stays ahead of the count.
+- `FMT_SEL = 0x101` / `PAK = 2` does not give MIPI RAW10 on this board:
+  it writes 12-bit containers and truncates lines.  The complete-frame
+  configuration is `FMT_SEL = 0x102` / `PAK = 1` with the line sized for
+  10 bits (continuous little-endian 10-bit bit stream per line).
+
 Scope: Gap analysis against `src/mt6785-mainline` (Linux 7.1, branch `yt11`), `kernel/configs/{pmos-mt6785,yoga11}.config`, `docs/hardware/{CAMERA,BOARD}.md`, `src/begonia-ftp/`, and `src/lenovo-gpl-4.14/`. Every "present" item cites `file:line`; missing items specify the exact register, bit, parent clock, or DT/driver change needed.
 
 ---

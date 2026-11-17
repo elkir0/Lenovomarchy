@@ -18,6 +18,13 @@ Three byte layouts are supported (--layout {le10,p12,raw10}):
 - raw10 (MIPI CSI-2 RAW10): 4 pixels in 5 bytes; bytes 0..3 hold the upper
   8 bits of pixels 0..3 and byte 4 holds their 2-bit LSBs (pixel 0 in [1:0],
   pixel 3 in [7:6]). Bytes per line = width * 10 / 8.
+- u16 (layout-sweep candidate): one little-endian 16-bit container per
+  pixel, 10-bit sample in the LOW bits (word & 0x3ff). Bytes per line =
+  width * 2. This is what a CAMSV FMT_SEL/PAK combination is hoped to
+  produce (libcamera's software ISP reads exactly this as SBGGR10); see
+  tools/camera/layout-sweep.sh and docs/research/camera/T13-LIBCAMERA.md.
+- u16h: same container, 10-bit sample in the HIGH bits (word >> 6, i.e.
+  MSB-justified). The option for the case the hardware left-justifies.
 
 The layout is auto-detected from the file size and the decoded content when
 --layout is not given (ties and flat frames keep le10). After unpacking, the
@@ -38,7 +45,7 @@ import sys
 import zlib
 
 # Layout names in tie-break preference order (le10 is this board's default).
-LAYOUTS = ('le10', 'p12', 'raw10')
+LAYOUTS = ('le10', 'p12', 'raw10', 'u16', 'u16h')
 
 # (r_phase, g1_phase, g2_phase, b_phase) indices into (p00, p01, p10, p11)
 # where p00=(2r,2c), p01=(2r,2c+1), p10=(2r+1,2c), p11=(2r+1,2c+1).
@@ -94,6 +101,8 @@ def bpl_for(width: int, layout: str) -> int:
         return (width * 10 + 7) // 8
     if layout == 'p12':
         return (width * 12 + 7) // 8
+    if layout in ('u16', 'u16h'):
+        return width * 2
     raise ValueError(f'unsupported layout {layout!r} (expected one of {LAYOUTS})')
 
 
@@ -105,10 +114,21 @@ def _enc_to_10bit(enc: int) -> int:
 
 _ENC_TO_RAW10 = tuple(_enc_to_10bit(i) for i in range(1024))
 _ENC_TO_RAW12 = tuple(i >> 2 for i in range(4096))
+# u16 container, 16-bit code space: sample in the low 10 bits (u16) or the
+# high 10 bits, i.e. >> 6 (u16h; the remaining bits are zero/undefined).
+_ENC_TO_RAW_U16 = tuple(i & 0x3FF for i in range(65536))
+_ENC_TO_RAW_U16H = tuple(i >> 6 for i in range(65536))
 
 # enc-space -> 10-bit sample table per layout (le10 and raw10 share the same
-# (msb8 | lsb2 << 8) encoding; p12 stores the raw 12-bit field, sample << 2).
-_ENC_TO_RAW_TABLE = {'le10': _ENC_TO_RAW10, 'raw10': _ENC_TO_RAW10, 'p12': _ENC_TO_RAW12}
+# (msb8 | lsb2 << 8) encoding; p12 stores the raw 12-bit field, sample << 2;
+# u16/u16h store the container word itself).
+_ENC_TO_RAW_TABLE = {
+    'le10': _ENC_TO_RAW10,
+    'raw10': _ENC_TO_RAW10,
+    'p12': _ENC_TO_RAW12,
+    'u16': _ENC_TO_RAW_U16,
+    'u16h': _ENC_TO_RAW_U16H,
+}
 
 
 def _phase_to_raw_tbl(layout: str) -> tuple[int, ...]:
@@ -171,7 +191,24 @@ def _p12_line_enc(line: bytes, width: int) -> list[int]:
     return enc
 
 
-GENERIC_LINE_DECODERS = {'le10': _le10_line_enc, 'raw10': _raw10_line_enc, 'p12': _p12_line_enc}
+def _u16_line_enc(line: bytes, width: int) -> list[int]:
+    """16-bit LE containers, 10-bit sample in the low bits (enc = container)."""
+    return [int.from_bytes(line[2 * x:2 * x + 2], 'little')
+            for x in range(min(width, len(line) // 2))] + [0] * max(0, width - len(line) // 2)
+
+
+def _u16h_line_enc(line: bytes, width: int) -> list[int]:
+    """16-bit LE containers, 10-bit sample in the high bits (enc = container)."""
+    return _u16_line_enc(line, width)
+
+
+GENERIC_LINE_DECODERS = {
+    'le10': _le10_line_enc,
+    'raw10': _raw10_line_enc,
+    'p12': _p12_line_enc,
+    'u16': _u16_line_enc,
+    'u16h': _u16h_line_enc,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -381,10 +418,34 @@ def unpack_p12_phases(
     return (p00_l, p01_l, p10_l, p11_l), hw, hh
 
 
+def unpack_u16_phases(
+    data: bytes, width: int, height: int, stride: int
+) -> tuple[tuple[memoryview | list[int], ...], int, int]:
+    """Unpack the u16/u16h layout (16-bit LE container per pixel) into the
+    four 2x2 Bayer phase planes.
+
+    The container word is the enc value itself; _ENC_TO_RAW_U16/_U16H map it
+    to the 10-bit sample.  Line reordering is the same as the le10 fast path.
+    """
+    layout = 'u16'  # the byte geometry is identical for u16h
+    data = _pad_short_input(data, width, height, stride, layout)
+    bpl = bpl_for(width, layout)
+    hw = width // 2
+    hh = height // 2
+    used_h = hh * 2
+    even_rows = b''.join(data[y * stride : y * stride + bpl] for y in range(0, used_h, 2))
+    odd_rows = b''.join(data[y * stride : y * stride + bpl] for y in range(1, used_h, 2))
+    even = memoryview(even_rows).cast('H')
+    odd = memoryview(odd_rows).cast('H')
+    return (even[0::2], even[1::2], odd[0::2], odd[1::2]), hw, hh
+
+
 PHASE_UNPACKERS = {
     'le10': unpack_le10_phases,
     'raw10': unpack_raw10_phases,
     'p12': unpack_p12_phases,
+    'u16': unpack_u16_phases,
+    'u16h': unpack_u16_phases,
 }
 
 
@@ -822,8 +883,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help='Byte layout: le10 = continuous little-endian 10-bit bit stream '
              'per line (default and what this board emits with FMT_SEL=0x102/'
              'PAK=1), p12 = old begonia 12-bit containers (FMT_SEL=0x101/PAK=2, '
-             'reference), raw10 = MIPI RAW10. When not given, the layout is '
-             'auto-detected from the file size and content (ties keep le10).',
+             'reference), raw10 = MIPI RAW10, u16/u16h = 16-bit LE container '
+             'per pixel with the 10-bit sample in the low (u16) or high (u16h) '
+             'bits (layout-sweep candidates, bytes/line = width * 2). When not '
+             'given, the layout is auto-detected from the file size and content '
+             '(ties keep le10).',
     )
     ap.add_argument(
         '--pack',

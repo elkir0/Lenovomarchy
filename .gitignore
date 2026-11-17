@@ -11,3 +11,4 @@
 *.zip
 /reference/
 /input/
+__pycache__/
