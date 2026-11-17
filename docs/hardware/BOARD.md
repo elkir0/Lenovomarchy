@@ -133,7 +133,18 @@ hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
 - Light/proximity: GPIO61/62 (`GPIO_SENSOR0_I2C`) are SCP_SCL0/SDA0 but
   also the AP's SCL1/SDA1, already muxed so by the boot loader. On i2c1:
   Lite-On LTR-578ALS at 0x53 (part ID 0xb1 at register 0x06) and an
-  unidentified device at 0x29. No mainline driver for the LTR-578 yet.
+  unidentified device at 0x29 (0x00 reads 0x01, 0xc0/0xc1 read 0xbc/0xda).
+  The LTR-578's light part uses the LTRF216A register map (MAIN_CTRL bit 1
+  enables it, ALS data at 0x0d-0x0f and clear data at 0x0a-0x0c, little
+  endian, MAIN_STATUS bit 3 new data; reset values ALS_MEAS_RATE 0x22,
+  18 bit / 100 ms, ALS_GAIN 0x01, x3), and Lite-On's formula is
+  lux = 0.8 * ALS_DATA / (gain * integration time in 100 ms units),
+  without a window factor. Kernel `yt11` adds it to the `ltrf216a` driver
+  (`liteon,ltr578`, lux multiplier 80) and to the board DT. Tested by
+  instantiating it by hand (`echo ltr578 0x53 >
+  /sys/bus/i2c/devices/i2c-1/new_device`): `in_illuminance_input` 0.27
+  lux in a dark room, 0 with the screen off; not yet tested in light, and
+  the DT node is not flashed yet. The proximity part is not supported.
 - Accelerometer + gyroscope: Bosch BMI220 (chip id 0x26) on GPIO63-66,
   which are SCP_SPI2 and also the AP's SPI2 (MI, CSB, MO, CLK; found by
   bit-banging the pins). Kernel `yt11` adds the BMI220 to the `bmi270`
