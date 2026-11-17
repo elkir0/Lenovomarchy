@@ -68,3 +68,20 @@ master clock neither sensor answers. Enabling one CAMTG clock at a time:
 cam0's MCLK (GPIO117, `CMMCLK1`) is `CLK_TOP_CAMTG2` and cam1's (GPIO120,
 `CMMCLK2`) is `CLK_TOP_CAMTG3`. Which physical camera (rear or front) is
 which slot and which CSI-2 port each sensor uses are still open.
+
+## First frames (2026-11-16, mainline, experiment modules)
+
+With the `mt6785-seninf-tm` / `mt6785-camsv-tm` modules and
+`tools/camera/` (see `docs/research/camera/T2-SENINF-CAMSV.md`):
+
+- The SENINF test model runs (MUX0 size 0x10001f00, pixel count advancing)
+  and `cap-tm.sh` gets a full 640x480 RAW10 test-pattern frame (384000
+  bytes) from CAMSV0 into memory, larb6/larb7 MMU bypassed.
+- OV8856 (cam0) streaming 640x480 on 2 lanes, sweeping the CSI ports with
+  `ov-cap.py`: only **CSI port 1** (SENINF2, MIPI RX ANA 0x4000/0x5000)
+  sees packets (PKT_CNT 0x01e1xxxx, MUX2 size 0x01e00280, DPHY lane state
+  0x110); ports 0 and 2 stay at zero. CAMSV0 then writes the full frame:
+  the sensor's colour bars come out as expected, and a capture without
+  the test pattern gives a dark noisy frame (dark room, not yet checked
+  in light). CAMSV0 INT_STATUS reads 0x0018048f and TG_FRMSIZE 640x481.
+- The S5K4H7 (cam1) path is not tried yet.
