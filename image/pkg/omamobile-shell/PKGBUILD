@@ -1,40 +1,158 @@
-# NOTE: Kept under image/pkg/ for reference only. The upstream repository
-# (github.com/omarchy-mobile/omarchy-mobile) no longer exists (HTTP 404);
-# image/build-rootfs.sh uses the prebuilt arch=any archive at
-# input/prebuilt/omamobile-shell-0.2.94-5-any.pkg.tar.zst instead.
+# Lenovo Yoga Tab 11 (YT-J706F) Wi-Fi tablet build of Omarchy Mobile's
+# omamobile-shell (image/pkg/omamobile-shell).
 #
-# Maintainer: Derek Ross <derek@ross.And>
-# Lenovo Yoga Tab 11 (YT-J706F) Wi-Fi tablet build (image/pkg/omamobile-shell):
-# Upstream omamobile-shell 0.2.94 from omarchy-mobile 87b8395, adapted for a
-# Wi-Fi-only tablet (no cellular modem, GNSS, torch, NFC, or fingerprint sensor).
+# Upstream: https://github.com/derekross/omarchy-mobile,
+# packages/omamobile-shell 0.2.133 (targets Omarchy 4.5.0-3; here it runs
+# against Omarchy 4.0.6, the version this image repacks — the shell kept its
+# 4.0 code paths: both dnd reads, both notification stores). Pinned at commit
+# c4623572be1c141d602cf99a83ae0bf9e3eea09c, tarball checked by sha256.
+#
+# What it is: ordinary Omarchy shell plugins (QML) that turn Omarchy's shell
+# into a touch shell: a status bar with a pull-down quick-settings sheet
+# (omamobile.bar replaces omarchy.bar), the dock, app drawer and search bar
+# (omamobile.launcher), recent apps (omamobile.switcher), home screens
+# (omamobile.home, built-in widgets only: OWL built-ins need the optional
+# omamobile-owl-widgets and are behind a features.json flag, off here), the
+# keyboard's show/hide calls and language sheet (omamobile.keyboard), and the
+# edge back swipe (omamobile.back); omamobile-setup-user links them into the
+# user's config. Nothing here is compiled and nothing patches Hyprland (the
+# image's own tablet.lua does the window rules; upstream's hypr/phone.lua is
+# not installed: it maximizes every window at phone scale, rebinds the power
+# and volume keys for Pixels and pulls in omamobile-keys/sleepd/doubletap).
+#
+# Tablet-specific (this PKGBUILD, the patches and the two profiles):
+#   - 0001-tablet-quick-settings-tiles.patch: no mobile-data, hotspot, torch,
+#     rotation-lock, location, NFC or fingerprint tiles (no modem, GNSS, flash
+#     LED or fingerprint sensor, Hotspot would drop the only Wi-Fi link, and
+#     rotation has no sensor daemon); the default layout is the tablet's;
+#   - 0002-wifi-wpa2-without-sae.patch: the MT7663 firmware has no SAE
+#     (WPA3), so the Wi-Fi panel joins a WPA3/WPA2 SSID with a WPA2-PSK
+#     profile through nmcli instead of Quickshell's key-mgmt=sae one (needs
+#     iw, to ask the radio);
+#   - 0003-tablet-quiet-pollers.patch: the home toggles watch the
+#     notification service's state files instead of a `qs ipc` call every
+#     30 s, and the bar starts its modem and call watchers only when the
+#     bar's cellWatch / callWatch setting is true (false in tablet-shell.json);
+#   - profile/shell.json is tablet-shell.json (only the plugins shipped here,
+#     the drawer at 6 columns, Omarchy's idle timers at 0 (off), the 18
+#     bar-widget-only Omarchy plugins plus omarchy.idle and
+#     omarchy.remote-session in disabledPlugins) and profile/home.json is
+#     tablet-home.json (a 6x8 home grid with the image's apps).
+#
+# Dropped from upstream's install (with why):
+#   - plugins omamobile.call, .fingerprint, .update, .access, .voice,
+#     .mobilenetwork: telephony (no modem; the call plugin and
+#     omamobile-call/cell-watch go together with omatel), the fingerprint
+#     sensor (none), the update sheet (needs omamobile-omarchy's
+#     omamobile-update, which the image does not ship), the permission sheet
+#     (needs the portal backend and xdg-desktop-portal wiring this image keeps
+#     stock), and voice/mobilenetwork (Voxtype daemon, omamobile-sit);
+#   - bin/omamobile-call-watch, -cell-watch (no modem, no omatel),
+#     -fp-enroll (no sensor), -nfc-open and its system unit (no NFC), -keys
+#     (Pixel power/volume-key semantics; the tablet keeps logind's power key),
+#     -sleepd and -doubletap and their units (phone sleep/wake daemons:
+#     sleepd assumes a phone suspend policy and keys wiring, doubletap needs
+#     omamobile-keys and turns Hyprland's wake-on-touch off), -onboarding
+#     (SIM/fingerprint/agent first-run prompts, phone-side), -portal-access
+#     and portal/ (the permission sheet's D-Bus backend), -open-intent
+#     (Android app links), -voice, -voice-preview (Voxtype), -weather and its
+#     units (GeoClue position path names omamobile-gnss's socket), -mobile-network
+#     (omamobile-sit), -reboot (the update sheet's Restart; kept out with it);
+#   - hypr/phone.lua (replaced by image/rootfs/tablet.lua: window rules at
+#     tablet scale, no key rebinds), squeekboard/keyboards and
+#     squeekboard/generate (the image ships its own terminal layouts with Esc
+#     under /usr/share/lenovomarchy; upstream's language layouts replace
+#     squeekboard's own with an action row for the phone's binds, which this
+#     image does not load), hooks/theme-set-keyboard and
+#     bin/omamobile-keyboard-theme (the image runs squeekboard unthemed by
+#     GTK css; theming can come back with the layouts if wanted),
+#     environment.d/20-omamobile-osk.conf (the image's
+#     20-lenovomarchy-osk.conf sets the input-method variables already; fcitx5
+#     is skipped in this image so there is nothing to override), the fcitx5
+#     drop-in (fcitx5 not installed), xdg-desktop-portal-gnome's drop-in and
+#     portals.conf (the image keeps Omarchy's stock portal choice),
+#     applications/*.desktop (AI Agent / open-intent / update-sheet entries,
+#     all phone-side), omamobile-osk-guard and its unit (a safety net for
+#     Omarchy's screensaver keyboard dance, which the phone patches drive;
+#     this image runs Omarchy stock with no screensaver);
+#   - depends: NOT omamobile-apps (it pulls the dialer, SMS, NFC and maps:
+#     none of those work here), not omamobile-omarchy (the image ships its
+#     own 0.1.32-era patch set; the 0.2.133 shell only needs its
+#     notification-forget IPC when swiping notifications out of the shade,
+#     which the image's omamobile-omarchy 0019 already carries), not
+#     omamobile-owl-widgets (built-in widgets are behind a flag, off).
+#
+# Kept as upstream ships them: bin/omamobile-setup-user (with --adopt, run by
+# install-mobile.sh), -launch (one app per screen; every launch path goes
+# through it), -home (Back at an app's top level), -osk-watch (keyboard
+# visibility), -bt-agent (quick settings' Bluetooth panel), -screenrecord,
+# -widget, -screenshot-open/-edit with environment.d/30-omamobile-screenshot.conf
+# (the screenshot toast opens Loupe), -set-pin, -keyboard-languages (the
+# language sheet; used with squeekboard's own popover layouts too),
+# branding/, the widget guides and examples, the polkit admin rule,
+# omamobile-setup-user.service (the image masks it after --adopt).
+#
+# Depends on Omarchy (4.0.6 from the local [lenovomarchy] repo) for the host
+# shell: omarchy-shell, omarchy-done, omarchy-menu, omarchy-toggle*,
+# omarchy-capture-screenshot, omarchy-notification-send, omarchy-theme-*,
+# omarchy-launch-floating-terminal-with-presentation, omarchy-agent-prompt,
+# omarchy-brightness-display and friends. Everything the shipped scripts call
+# that is not in `depends` is listed in the Not-guaranteed note below and
+# degrades to a dimmed tile, a message or a no-op when missing.
+
+# Maintainer (upstream): Derek Ross <derek@ross.And>
+
 pkgname=omamobile-shell
-pkgver=0.2.94
-pkgrel=1
-pkgdesc='Quickshell plugins for Omarchy on Lenovo Yoga Tab 11 (status bar, quick settings, app drawer, task switcher, home screen, keyboard hide button, back gesture)'
+pkgver=0.2.133
+pkgrel=2
+pkgdesc="Omarchy Mobile's touch shell for Omarchy: status bar, quick settings, launcher, recents, home, back swipe (YT-J706F Wi-Fi tablet build)"
 arch=(any)
-url='https://github.com/omarchy-mobile/omarchy-mobile'
+url="https://github.com/derekross/omarchy-mobile"
 license=(MIT)
 depends=(
-  'omarchy>=4.0'
-  'quickshell>=0.3'
-  bash
-  python
-  python-dbus
-  python-gobject
-  bluez
-  networkmanager
-  iw
-  util-linux
-  power-profiles-daemon
-  wf-recorder
-  ffmpeg
-  wl-clipboard
-  libnotify
+  'omarchy>=4.0.6'
+  bash python python-dbus python-gobject   # osk-watch, bt-agent, keyboard-languages, widget
+  squeekboard                               # the on-screen keyboard (sm.puri.OSK0)
+  quickshell                                # the host shell (qs); pulled by omarchy already
+  qt6-declarative                           # the QML runtime the plugins import
+  bluez bluez-utils                         # Bluetooth panel and rfkill
+  networkmanager iw                         # Wi-Fi panel, the SAE probe (patch 0002)
+  util-linux                                # busctl (keyboard tile, sleepd-free build: tiles)
+  jq                                        # BackModel's terminal sniff, omamobile-launch
+  inotify-tools                             # the home screen's user-widget watch
+  wtype                                     # the back gesture's Escape key
+  wf-recorder                               # the Screen record tile
+  libnotify                                 # omamobile-screenrecord's fallback toast
+  brightnessctl                             # the brightness slider (and the torch probe, tile dropped)
 )
-makedepends=()
+optdepends=(
+  'loupe: what a screenshot toast opens (omamobile-screenshot-open); the image installs it'
+  'khal: events in the home screen calendar widget'
+  'playerctl: the home screen media widget'
+  'power-profiles-daemon: the Battery saver tile (dimmed "No power profiles" without it)'
+  'hyprsunset: the Night light tile (dimmed "No hyprsunset" without it)'
+  "omacam: Omarchy Mobile's camera app (independent of the shell; the image builds its own)"
+  "omamobile-settings: Omarchy Mobile's Settings app (independent of the shell; add when wanted)"
+  'omamobile-owl-widgets: the OWL built-in home widgets (behind features.json owlWidgets, off by default)'
+  "gum: omamobile-set-pin's interactive chooser (falls back to passwd otherwise)"
+  'foot: a terminal for omamobile-launch cmd and the agent prompt (any xdg-terminal-exec works)'
+  'xdg-terminal-exec: the terminal launcher omamobile-launch prefers'
+)
+checkdepends=(nodejs diffutils patch)
 install=omamobile-shell.install
 
-_commit=87b83956280d7e38af07124ef65f190701c881cf
+# Not guaranteed by depends, called by shipped code (all degrade quietly):
+#   voxtype (Dictation tile probe says "not installed"; tile kept out of the
+#     default layout), omacam (only from omamobile-keys, not shipped),
+#   omamobile-sit / omamobile-gnss / neard / fprintd / omatel-agent (never
+#     called: their plugins and bins are not shipped; strings may remain in
+#     README/docs), omarchy-audio-output-volume (omamobile-keys only),
+#   tensaku-edit (screenshot-edit fallback, only when Loupe is absent),
+#   omamobile-voice / voxtype (the voice plugin and its daemon, not shipped).
+# Verified: `grep -oE` over every installed /usr/bin script and plugin for
+# command names, cross-checked against depends and optdepends.
+
+_commit=c4623572be1c141d602cf99a83ae0bf9e3eea09c
 _tarball="omarchy-mobile-${_commit}.tar.gz"
 _dir="omarchy-mobile-${_commit}/packages/omamobile-shell"
 source=(
@@ -45,10 +163,12 @@ source=(
   0001-tablet-quick-settings-tiles.patch
   0002-wifi-wpa2-without-sae.patch
   0003-tablet-quiet-pollers.patch
+  0004-tablet-phone-leftovers.patch
 )
 noextract=("${_tarball}")
 sha256sums=(
-  '27e24ba994997d7cf823730bfcc0c1ba19ab19e49e840d23efbf13ec2da9f53d'
+  '892334c964e0389952bddfc9b36fc9c64b660c79cad49ca654709c45f63ae7bf'
+  'SKIP'
   'SKIP'
   'SKIP'
   'SKIP'
@@ -57,19 +177,23 @@ sha256sums=(
   'SKIP'
 )
 
+# What this build keeps of upstream's install script's output (see the header
+# for the full omission list and reasons).
 _plugins=(omamobile.bar omamobile.quicksettings omamobile.launcher omamobile.switcher
           omamobile.home omamobile.keyboard omamobile.back)
-_bins=(omamobile-setup-user omamobile-launch omamobile-osk-watch omamobile-bt-agent
-       omamobile-screenrecord omamobile-widget
-       omamobile-set-pin omamobile-screenshot-open omamobile-screenshot-edit)
+_bins=(omamobile-setup-user omamobile-launch omamobile-home omamobile-osk-watch
+       omamobile-bt-agent omamobile-screenrecord omamobile-widget
+       omamobile-keyboard-languages omamobile-set-pin
+       omamobile-screenshot-open omamobile-screenshot-edit)
 
 prepare() {
   bsdtar -xf "$srcdir/$_tarball" "$_dir"
   cd "$srcdir/$_dir"
   [[ $(cat version) == "$pkgver" ]] || { echo "upstream version is not $pkgver" >&2; return 1; }
-  patch -Np1 -i "$srcdir/0001-tablet-quick-settings-tiles.patch"
-  patch -Np1 -i "$srcdir/0002-wifi-wpa2-without-sae.patch"
-  patch -Np1 -i "$srcdir/0003-tablet-quiet-pollers.patch"
+  patch -Np1 --fuzz=0 -i "$srcdir/0001-tablet-quick-settings-tiles.patch"
+  patch -Np1 --fuzz=0 -i "$srcdir/0002-wifi-wpa2-without-sae.patch"
+  patch -Np1 --fuzz=0 -i "$srcdir/0003-tablet-quiet-pollers.patch"
+  patch -Np1 --fuzz=0 -i "$srcdir/0004-tablet-phone-leftovers.patch"
   cp "$srcdir/tablet-shell.json" profile/shell.json
   cp "$srcdir/tablet-home.json" profile/home.json
 }
@@ -77,6 +201,8 @@ prepare() {
 check() {
   cd "$srcdir/$_dir"
   local f p
+  # Every shipped bin parses under its own interpreter (as strict as the
+  # 0.2.94 recipe's check, on the smaller set of bins this build ships).
   for f in "${_bins[@]}"; do
     case "$(head -n1 "bin/$f")" in
       *python3*) python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "bin/$f" ;;
@@ -88,10 +214,14 @@ check() {
            plugins/omamobile.home/locate.sh; do
     bash -n "$f"
   done
+  # The plugins this build ships have valid manifests with the ids we expect.
   for p in "${_plugins[@]}"; do
     python3 -c 'import json, sys; m = json.load(open(sys.argv[1])); assert m["id"] == sys.argv[2], m["id"]' \
       "plugins/$p/manifest.json" "$p"
   done
+  # The tablet profile: only shipped plugins named, the drawer at 6 columns,
+  # both modem watchers off, the Omarchy bar widgets (and omarchy.idle and
+  # omarchy.remote-session) disabled.
   python3 - profile/shell.json "${_plugins[@]}" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
@@ -102,6 +232,43 @@ assert [p.get("columns") for p in config["plugins"] if p["id"] == "omamobile.lau
 assert not config["bar"].get("cellWatch", False) and not config["bar"].get("callWatch", False)
 PY
   python3 -c 'import json, sys; h = json.load(open(sys.argv[1])); assert h["grid"] == {"columns": 6, "rows": 8}' profile/home.json
+  # The home layout survives HomeModel.normalize unchanged in its grid and
+  # items (clamping would mean the profile disagrees with 0.2.133's limits).
+  node - <<'JS'
+const H = require("./plugins/omamobile.home/HomeModel.js")
+const fs = require("fs")
+const raw = JSON.parse(fs.readFileSync("profile/home.json", "utf8"))
+const layout = H.normalize(raw, H.REGISTRY)
+if (!layout) throw new Error("profile/home.json is not a layout")
+if (layout.grid.columns !== 6 || layout.grid.rows !== 8) throw new Error("grid clamped: " + JSON.stringify(layout.grid))
+const items = (p) => p.items.map((i) => i.id).join(",")
+if (layout.pages.map(items).join("|") !== raw.pages.map(items).join("|")) throw new Error("items moved")
+JS
+  # Upstream's own suite, run from a copy of this tree (test/all) so its
+  # in-tree expectations (phone plugins, phone.lua, owl) meet the tablet's
+  # edits where they overlap: the tiles, dnd and wifi tests are ours above;
+  # the rest of test/all checks upstream code this build ships unchanged.
+  # What cannot run in the container is skipped inside test/all itself
+  # (qmltestrunner/qmlformat/lua quick-checks SKIP without the tool).
+  bash test/tile-scripts.sh
+  bash test/dnd-state.sh
+  bash test/setup-user.sh
+  for t in tiles-model wifi-model bluetooth-model gesture-model home-model \
+           back-model back-link switcher-model notifications-model media-model \
+           keyboard-model status-model battery-state; do
+    node "test/$t.js" >/dev/null
+  done
+  bash test/install-hook.sh
+  bash test/osk-guard.sh
+  bash test/keyboard-theme.sh >/dev/null
+  bash test/home-command.sh
+  bash test/reboot-command.sh
+  python3 -B test/launch.py
+  python3 -B test/widget-tool.py
+  python3 -B test/bt-agent.py
+  # test/keyboard-layouts.py is not run: it checks squeekboard layouts with
+  # PyYAML, and neither the layouts nor a PyYAML dependency are shipped here.
+  python3 -B test/doubletap.py
 }
 
 package() {
@@ -125,11 +292,11 @@ package() {
     install -Dm644 "$f" "$share/widget-${f#widgets/}"
   done < <(find widgets/template widgets/examples -type f -print0)
   install -Dm644 systemd/user/omamobile-setup-user.service "$pkgdir/usr/lib/systemd/user/omamobile-setup-user.service"
-  install -Dm644 environment.d/30-omamobile-screenshot.conf \
-    "$pkgdir/usr/lib/environment.d/30-omamobile-screenshot.conf"
   install -d "$pkgdir/usr/lib/systemd/user/graphical-session-pre.target.wants"
   ln -sfn ../omamobile-setup-user.service \
     "$pkgdir/usr/lib/systemd/user/graphical-session-pre.target.wants/omamobile-setup-user.service"
+  install -Dm644 environment.d/30-omamobile-screenshot.conf \
+    "$pkgdir/usr/lib/environment.d/30-omamobile-screenshot.conf"
   install -Dm644 polkit/49-omamobile-admin-self.rules "$pkgdir/usr/share/polkit-1/rules.d/49-omamobile-admin-self.rules"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 widgets/LICENSE-owl-guide "$pkgdir/usr/share/licenses/$pkgname/LICENSE-owl-guide"

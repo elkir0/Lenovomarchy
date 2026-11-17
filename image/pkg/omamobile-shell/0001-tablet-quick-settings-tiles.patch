@@ -1,26 +1,28 @@
-SM-T715 tablet: quick settings without the phone's tiles.
+YT-J706F tablet: quick settings without the phone's tiles.
 
 Drops mobile data, hotspot, torch, location, NFC, fingerprint and rotation
-lock from the tile catalogue (the tablet has no driven modem, GNSS, flash
-LED, NFC or fingerprint sensor, Hotspot would take the only Wi-Fi link, and
-rotation comes with P3), so they show neither in the sheet nor under "Add
-tiles"; a saved layout that names them loses them (sanitize() skips unknown
-ids). The default layout is the tablet's own tiles. Against omarchy-mobile
-87b8395 (omamobile-shell 0.2.94), packages/omamobile-shell (applied with
-patch -p1 in that directory).
+lock from the tile catalogue (the Wi-Fi tablet has no driven modem, GNSS,
+flash LED, NFC or fingerprint sensor, Hotspot would take the only Wi-Fi
+link, and there is no sensor daemon to lock), so they show neither in the
+sheet nor under "Add tiles"; a saved layout that names them loses them
+(sanitize() skips unknown ids). The default layout is the tablet's own
+tiles. test/tiles-model.js follows: its catalog, default and available-list
+assertions now say the tablet's. Against omarchy-mobile c462357
+(omamobile-shell 0.2.133), packages/omamobile-shell (applied with patch -p1
+in that directory).
 
 diff --git a/plugins/omamobile.quicksettings/TilesModel.js b/plugins/omamobile.quicksettings/TilesModel.js
-index 1b510df..c366ccb 100644
+index 1b510df..865e2db 100644
 --- a/plugins/omamobile.quicksettings/TilesModel.js
 +++ b/plugins/omamobile.quicksettings/TilesModel.js
 @@ -12,17 +12,15 @@
  var VERSION = 1
  
  // Every tile the sheet knows, in the order the "available" list shows them.
-+// SM-T715 tablet (sm-t715-omarchy, pkg/omamobile-shell): no mobile data,
-+// hotspot, torch, location or NFC (the tablet's modem, GNSS, flash LED and
-+// NFC are not driven, and Hotspot would drop the only Wi-Fi link), no
-+// fingerprint sensor, and no rotation lock until rotation exists (P3).
++// Lenovo Yoga Tab 11 (YT-J706F) Wi-Fi build (image/pkg/omamobile-shell): no
++// mobile data, hotspot, torch, location or NFC (the tablet's modem, GNSS,
++// flash LED and NFC are not driven, and Hotspot would drop the only Wi-Fi
++// link), no fingerprint sensor, and no rotation lock (no sensor daemon).
  var CATALOG = [
    { id: "wifi", label: "Wi-Fi" },
    { id: "bluetooth", label: "Bluetooth" },
@@ -43,14 +45,13 @@ index 1b510df..c366ccb 100644
    { id: "keyboard", label: "Keyboard" },
    { id: "clipboard", label: "Clipboard" },
    { id: "dictation", label: "Dictation" }
-@@ -40,11 +37,14 @@ var CATALOG = [
+@@ -40,11 +37,13 @@ var CATALOG = [
  // reached for most. Clipboard and Dictation close the second page: Omarchy
  // reaches them only by keyboard shortcut, so a tile is their touch path
  // (TOUCH-PLAN 1.12), and appending them leaves the first page as it was.
-+// SM-T715 tablet: the tablet's own tiles only. Stay awake, Microphone,
-+// Screen record and Dictation stay under "Add tiles" (Stay awake is on in
-+// the image, and turning it off would let the idle lock come up, which
-+// needs a PIN pad: P4).
++// YT-J706F tablet: the tiles that work here only. Microphone, Screen record
++// and Screenshot stay under "Add tiles"; Stay awake is on in the image, and
++// turning it off would let the idle lock come up.
  var DEFAULT_LAYOUT = [
 -  "wifi", "bluetooth", "dnd", "torch",
 -  "mobile-data", "rotation-lock", "airplane", "location",
@@ -62,3 +63,75 @@ index 1b510df..c366ccb 100644
  ]
  
  var QUICK_COUNT = 4
+diff --git a/test/tiles-model.js b/test/tiles-model.js
+index 1dd8978..a232066 100644
+--- a/test/tiles-model.js
++++ b/test/tiles-model.js
+@@ -22,16 +22,23 @@ test("the sheet has a backend for every catalog tile", () => {
+   for (const { id } of M.CATALOG) assert.ok(block.includes(`"${id}":`), `backend for ${id}`)
+ })
+ 
+-test("the default keeps the old ten tiles and leads with the most used", () => {
+-  for (const id of ["wifi", "bluetooth", "mobile-data", "rotation-lock", "torch", "dnd", "location", "nfc", "fingerprint", "keyboard"])
++// YT-J706F tablet: the default is the tablet's own (patch
++// 0001-tablet-quick-settings-tiles), and the phone's tiles are not even in
++// the catalog.
++test("the default keeps the tablet's tiles and leads with the most used", () => {
++  for (const id of ["wifi", "bluetooth", "dnd", "airplane", "battery-saver", "dark-theme", "night-light", "keyboard", "clipboard", "screenshot"])
+     assert.ok(M.DEFAULT_LAYOUT.includes(id), id)
+-  assert.deepStrictEqual(M.quickRow(M.defaults()), ["wifi", "bluetooth", "dnd", "torch"])
++  assert.deepStrictEqual(M.quickRow(M.defaults()), ["wifi", "bluetooth", "dnd", "airplane"])
++  for (const id of ["mobile-data", "hotspot", "torch", "rotation-lock", "location", "nfc", "fingerprint"])
++    assert.ok(!M.known(id), id)
+ })
+ 
+ test("Clipboard and Dictation close the default's second page, leaving the first as it was", () => {
++  // the tablet's default is one tile short of a page, so Clipboard closes
++  // the first page here and Screenshot opens the second
+   assert.deepStrictEqual(M.pages(M.defaults())[0],
+-    ["wifi", "bluetooth", "dnd", "torch", "mobile-data", "rotation-lock", "airplane", "location"])
+-  assert.deepStrictEqual(M.DEFAULT_LAYOUT.slice(-2), ["clipboard", "dictation"])
++    ["wifi", "bluetooth", "dnd", "airplane", "battery-saver", "dark-theme", "night-light", "keyboard"])
++  assert.strictEqual(M.DEFAULT_LAYOUT.slice(-1)[0], "screenshot")
+   assert.strictEqual(M.pages(M.defaults()).length, 2)
+   assert.strictEqual(M.label("clipboard"), "Clipboard")
+   assert.strictEqual(M.label("dictation"), "Dictation")
+@@ -44,7 +51,7 @@ test("defaults() is a copy", () => {
+ })
+ 
+ test("sanitize drops unknown ids, non-strings and duplicates, keeping order", () => {
+-  assert.deepStrictEqual(M.sanitize(["torch", "bogus", 3, null, "wifi", "torch"]), ["torch", "wifi"])
++  assert.deepStrictEqual(M.sanitize(["mic", "bogus", 3, null, "wifi", "mic"]), ["mic", "wifi"])
+   assert.deepStrictEqual(M.sanitize([]), [])
+   assert.deepStrictEqual(M.sanitize("wifi"), M.DEFAULT_LAYOUT)
+   assert.deepStrictEqual(M.sanitize(null), M.DEFAULT_LAYOUT)
+@@ -60,15 +67,15 @@ test("parseConfig falls back to the default on anything unreadable", () => {
+ })
+ 
+ test("serialize round-trips through parseConfig", () => {
+-  const text = M.serialize(["hotspot", "wifi", "bogus"])
++  const text = M.serialize(["mic", "wifi", "bogus"])
+   assert.ok(text.endsWith("\n"))
+-  assert.deepStrictEqual(JSON.parse(text), { version: 1, tiles: ["hotspot", "wifi"] })
+-  assert.deepStrictEqual(M.parseConfig(text), ["hotspot", "wifi"])
++  assert.deepStrictEqual(JSON.parse(text), { version: 1, tiles: ["mic", "wifi"] })
++  assert.deepStrictEqual(M.parseConfig(text), ["mic", "wifi"])
+ })
+ 
+ test("parseList takes JSON or space- and comma-separated ids", () => {
+-  assert.deepStrictEqual(M.parseList("wifi torch  dnd"), ["wifi", "torch", "dnd"])
+-  assert.deepStrictEqual(M.parseList("wifi,torch"), ["wifi", "torch"])
++  assert.deepStrictEqual(M.parseList("wifi mic  dnd"), ["wifi", "mic", "dnd"])
++  assert.deepStrictEqual(M.parseList("wifi,mic"), ["wifi", "mic"])
+   assert.deepStrictEqual(M.parseList('["mic","x"]'), ["mic"])
+   assert.deepStrictEqual(M.parseList("[]"), [])
+   assert.strictEqual(M.parseList(""), null)
+@@ -78,7 +85,7 @@ test("parseList takes JSON or space- and comma-separated ids", () => {
+ 
+ test("available lists the hidden tiles in catalog order", () => {
+   const spare = M.available(M.defaults())
+-  assert.deepStrictEqual(spare, ["hotspot", "stay-awake", "mic", "screenshot", "screen-record"])
++  assert.deepStrictEqual(spare, ["stay-awake", "mic", "screen-record", "dictation"])
+   assert.strictEqual(M.available([]).length, M.CATALOG.length)
+   assert.deepStrictEqual(M.available(M.CATALOG.map((t) => t.id)), [])
+ })

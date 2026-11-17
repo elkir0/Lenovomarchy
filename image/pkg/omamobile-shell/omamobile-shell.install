@@ -1,7 +1,15 @@
 # SPDX-License-Identifier: MIT
 post_install() {
-  echo "Run 'omamobile-setup-user' as each user (the Lenovomarchy image does it at build time)."
+  echo "Run 'omamobile-setup-user --adopt' as each user (the Lenovomarchy image does it at build time)."
 }
+
+# Upstream reloads every running Hyprland here, because its phone.lua binds
+# change between releases and a running session kept dead binds. This build
+# installs no Hyprland file at all (the image's tablet.lua holds the rules),
+# so there is nothing to reload: the shell's own surfaces (the bar, the
+# drawer) are Quickshell windows that re-read their files at the next shell
+# start, and omamobile-setup-user.service (or a manual 'omamobile-setup-user')
+# brings new plugins and profile keys to each user.
 post_upgrade() {
-  echo "New shell plugins and settings reach a user with 'omamobile-setup-user'."
+  echo "New shell plugins and settings reach a user with 'omamobile-setup-user' (at their next login, or now by hand)."
 }

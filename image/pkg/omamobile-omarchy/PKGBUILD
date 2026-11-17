@@ -1,127 +1,97 @@
-# NOTE: Kept under image/pkg/ for reference only. The upstream repository
-# (github.com/omarchy-mobile/omarchy-mobile) no longer exists (HTTP 404);
-# image/build-rootfs.sh uses the prebuilt arch=any archive at
-# input/prebuilt/omamobile-omarchy-0.1.32-1.2-any.pkg.tar.zst instead.
+# Lenovo Yoga Tab 11 (YT-J706F) build of omamobile-omarchy.
 #
-# Maintainer: Derek Ross <derek@ross.And>
-# Lenovo Yoga Tab 11 (YT-J706F) tablet build (image/pkg/omamobile-omarchy):
-# Upstream omamobile-omarchy 0.1.32 from omarchy-mobile 87b8395, adapted for an
-# Arch Linux ARM aarch64 tablet without a packaged kernel.
+# Upstream is https://github.com/derekross/omarchy-mobile (it moved from
+# github.com/omarchy-mobile/omarchy-mobile, which is gone); this recipe pins
+# upstream commit c4623572be1c141d602cf99a83ae0bf9e3eea09c (omamobile-omarchy
+# 0.1.48, 2026-11-16) by tarball and sha256, and takes the patch tool
+# (bin/omamobile-omarchy-patches), lib/lock-pam, the libalpm hook, the
+# tmpfiles rule and the test harness from that tree.
+#
+# The two series families (patches/ for Omarchy 4.5, legacy-4.0.6/ for 4.0.6)
+# live in this directory, trimmed for a Wi-Fi-only tablet with no packaged
+# kernel, plus two tablet patches (9000/9001). install/ and test/ are the
+# tablet's. See docs/research/omamobile/M1-OMARCHY-PATCHES.md for every
+# keep/drop decision and the upgrade plan.
+#
+# Maintainer: Derek Ross <derek@ross.And> (upstream)
+# Tablet port: Lenovomarchy (image/pkg/omamobile-omarchy)
 pkgname=omamobile-omarchy
-pkgver=0.1.32
+pkgver=0.1.48
 pkgrel=1
-pkgdesc='Idempotent patch series over /usr/share/omarchy for Omarchy Mobile (YT-J706F tablet)'
+pkgdesc='Omarchy Mobile patch series for the Lenovo Yoga Tab 11 (YT-J706F): touch lock and shell patches over /usr/share/omarchy, re-applied after every Omarchy upgrade'
 arch=(any)
-url='https://github.com/omarchy-mobile/omarchy-mobile'
+url='https://github.com/derekross/omarchy-mobile'
 license=(MIT)
 depends=(
   'omarchy>=4.0.6'
-  'omarchy<4.1'
-  patch
   bash
-  pacman
+  python
+  patch
+  libarchive
+  util-linux
 )
-makedepends=(git)
+checkdepends=(diffutils patch util-linux libarchive)
+optdepends=('omamobile-shell: the tablet status bar, quick settings and home screen')
 install=omamobile-omarchy.install
 
-_commit=87b83956280d7e38af07124ef65f190701c881cf
+_commit=c4623572be1c141d602cf99a83ae0bf9e3eea09c
+_tarball="omarchy-mobile-${_commit}.tar.gz"
 source=(
-  "omarchy-mobile::git+${url}.git#commit=${_commit}"
+  "${_tarball}::${url}/archive/${_commit}.tar.gz"
   omamobile-omarchy.install
-  pacman-keeps-alarm.patch
-  update-without-kernel-package.patch
 )
 sha256sums=(
-  'SKIP'
-  'SKIP'
-  'SKIP'
+  '892334c964e0389952bddfc9b36fc9c64b660c79cad49ca654709c45f63ae7bf'
   'SKIP'
 )
+noextract=("${_tarball}")
 
 prepare() {
-  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
-  local dir="$sub/patches/omarchy"
-
-  grep -q "^pkgver=${pkgver}$" "$sub/PKGBUILD" || {
-    echo "ERROR: upstream PKGBUILD is not pkgver=${pkgver}" >&2
+  bsdtar -xf "$srcdir/$_tarball" \
+    "omarchy-mobile-${_commit}/packages/$pkgname"
+  cd "$srcdir/omarchy-mobile-${_commit}/packages/$pkgname"
+  [[ $(cat version) == "$pkgver" ]] || {
+    echo "upstream version is not $pkgver" >&2
+    return 1
+  }
+  # The unmodified upstream series must apply to the Omarchy versions it was
+  # checked against, before the tablet overlay takes patches away: if these
+  # counts drift after an upstream bump, re-do the tablet trim.
+  local n4x=$(ls patches/*.patch | wc -l) n406=$(ls legacy-4.0.6/*.patch | wc -l)
+  (( n4x == 29 && n406 == 29 )) || {
+    echo "upstream series sizes changed (4.5: $n4x, 4.0.6: $n406; expected 29/29)" >&2
+    echo "redo the tablet trim against the new upstream" >&2
     return 1
   }
 
-  # Remove phone-only patches (Pixel 7 Pro SIM PIN, Tensor audio/GPS, Omarchy Menu Phone entry)
-  rm -f \
-    "$dir/0010-lock-sim-pin-unlock-before-session-password-step.patch" \
-    "$dir/0014-menu-phone-entry-under-trigger-for-mobile-settings.patch" \
-    "$dir/0020-menu-setup-audio-and-gps-open-omamobile-settings-on-a-phone.patch" \
-    "$dir/0022-lock-recheck-sim-state-when-the-lock-becomes-visible.patch"
-
-  install -m644 "$srcdir/pacman-keeps-alarm.patch" \
-    "$dir/0025-tablet-pacman-keeps-alarm.patch"
-  install -m644 "$srcdir/update-without-kernel-package.patch" \
-    "$dir/0026-tablet-update-without-kernel-package.patch"
-
-  # 0003 changes the menu font size to 16pt (phone); use 13pt on tablet.
-  sed -i 's/font-size: 16pt;/font-size: 13pt;/' \
-    "$dir/0003-shell-touch-scale-and-layout-across-bars-menus-and-popups.patch"
+  # The patch tool, lock-pam, the libalpm hook, the tmpfiles rule and the
+  # licences come from upstream; everything else (both series, install,
+  # .install, tests) is the tablet's, carried in this directory.
+  rm -rf "$srcdir/pkgsrc-root"
+  mkdir -p "$srcdir/pkgsrc-root"
+  cp -a bin/omamobile-omarchy-patches lib/lock-pam \
+        libalpm/95-omamobile-omarchy-patches.hook tmpfiles/omamobile-run.conf \
+        LICENSE LICENSE.omarchy "$srcdir/pkgsrc-root/"
+  mkdir -p "$srcdir/pkgsrc-root/bin" "$srcdir/pkgsrc-root/lib" \
+           "$srcdir/pkgsrc-root/libalpm" "$srcdir/pkgsrc-root/tmpfiles"
+  mv "$srcdir/pkgsrc-root/omamobile-omarchy-patches" "$srcdir/pkgsrc-root/bin/"
+  mv "$srcdir/pkgsrc-root/lock-pam" "$srcdir/pkgsrc-root/lib/"
+  mv "$srcdir/pkgsrc-root/95-omamobile-omarchy-patches.hook" "$srcdir/pkgsrc-root/libalpm/"
+  mv "$srcdir/pkgsrc-root/omamobile-run.conf" "$srcdir/pkgsrc-root/tmpfiles/"
+  cp -a "$startdir/patches" "$startdir/legacy-4.0.6" "$startdir/install" \
+        "$startdir/omamobile-omarchy.install" "$startdir/version" "$startdir/test" \
+        "$srcdir/pkgsrc-root/"
 }
 
 check() {
-  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
-  local dir="$sub/patches/omarchy"
-  shopt -s nullglob
-  local patches=("$dir"/[0-9][0-9][0-9][0-9]-*.patch)
-  (( ${#patches[@]} == 24 )) || {
-    echo "ERROR: expected 24 patches, found ${#patches[@]}" >&2
-    printf '  %s\n' "${patches[@]}" >&2
-    return 1
-  }
-  bash -n "$sub/bin/omamobile-omarchy-patches"
-
-  if [[ -f /usr/share/omarchy/bin/omarchy-menu ]]; then
-    local tree="$srcdir/verify-tree"
-    rm -rf "$tree"
-    cp -a /usr/share/omarchy "$tree"
-    local p
-    for p in "${patches[@]}"; do
-      patch -p1 -d "$tree" --forward --batch --silent --dry-run <"$p" || {
-        echo "ERROR: $(basename "$p") does not apply to /usr/share/omarchy" >&2
-        return 1
-      }
-      patch -p1 -d "$tree" --forward --batch --silent --no-backup-if-mismatch <"$p"
-    done
-    rm -rf "$tree"
-  fi
+  # Upstream's test suite, adapted to the tablet tree (the tail of test/all
+  # says what is not run here and why). GNU install(1) and util-linux
+  # script(1)/setsid make parts of it Linux-only; the build container is
+  # Arch Linux ARM, so they run there.
+  cp -a "$srcdir/pkgsrc-root" "$srcdir/checktree"
+  bash "$srcdir/checktree/test/all"
 }
 
 package() {
-  local sub="$srcdir/omarchy-mobile/packages/$pkgname"
-
-  install -Dm755 "$sub/bin/omamobile-omarchy-patches" \
-    "$pkgdir/usr/bin/omamobile-omarchy-patches"
-
-  install -Dm644 "$sub/hooks/95-omamobile-omarchy-patches.hook" \
-    "$pkgdir/usr/share/libalpm/hooks/95-omamobile-omarchy-patches.hook"
-
-  install -d "$pkgdir/usr/share/omamobile/patches/omarchy"
-  install -m644 "$sub/patches/omarchy/README.md" \
-    "$pkgdir/usr/share/omamobile/patches/omarchy/README.md"
-  shopt -s nullglob
-  local p
-  for p in "$sub/patches/omarchy"/[0-9][0-9][0-9][0-9]-*.patch; do
-    install -m644 "$p" "$pkgdir/usr/share/omamobile/patches/omarchy/$(basename "$p")"
-  done
-
-  install -Dm755 /dev/stdin "$pkgdir/usr/lib/omamobile-omarchy/lock-pam" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-pam=/etc/pam.d/omarchy-lock-password
-[[ -f $pam ]] && exit 0
-install -Dm644 /dev/stdin "$pam" <<'PAM'
-#%PAM-1.0
-auth       include      system-auth
-account    include      system-auth
-PAM
-EOF
-
-  install -Dm644 "$srcdir/omarchy-mobile/LICENSE" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  "$srcdir/pkgsrc-root/install" "$pkgdir"
 }
