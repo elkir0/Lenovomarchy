@@ -5,26 +5,29 @@
 #   sensor -> mtk-mt6785-seninf (selector) -> mtk-mt6785-camsv -> /dev/videoN
 #
 # Selects the sensor (-c): the seninf is an input selector, every bound
-# sensor has a link to the sink pad of its CSI port and at most one of
-# those links may be enabled (the driver refuses a second one), so the
-# script disables the other enabled sensor link, then enables the chosen
-# one.  It then sets the sensor mode (-s), reads back the media bus code
-# the sensor actually uses (media-ctl --get-v4l2), sets the same code and
-# size on the seninf sink and camsv sink pads, the matching packed fourcc
-# on the video node, streams N frames and converts the last one to a PNG
-# with raw2rgb.py --layout le10 --bayer <order>.
+# sensor has a link to the sink pad of its CSI port and exactly one of
+# those links is enabled (the driver switches the selection itself when
+# another one is enabled), so the script just enables the chosen link.
+# It then sets the sensor mode (-s), reads back the media bus code the
+# sensor actually uses (media-ctl --get-v4l2), sets the same code and
+# size on the seninf sink and camsv sink pads, the matching unpacked
+# 10-bit fourcc on the video node (bytesperline = width * 2), streams N
+# frames and converts the last one to a PNG with raw2rgb.py
+# --layout u16 --bayer <order>.
 #
 # FOURCC/BAYER MAP (bus code -> video fourcc -> raw2rgb --bayer):
-#   SBGGR10_1X10 -> pBAA -> bggr
-#   SGBRG10_1X10 -> pGAA -> gbrg
-#   SGRBG10_1X10 -> pgAA -> grbg
-#   SRGGB10_1X10 -> pRAA -> rggb
+#   SBGGR10_1X10 -> BG10 -> bggr
+#   SGBRG10_1X10 -> GB10 -> gbrg
+#   SGRBG10_1X10 -> BA10 -> grbg
+#   SRGGB10_1X10 -> RG10 -> rggb
 #
-# BYTE LAYOUT WARNING: the driver labels its format S*10P, but the
-# hardware writes a continuous little-endian 10-bit bit stream per line
-# (pixel k in bits 10k..10k+9), NOT the MIPI RAW10 layout of S*10P.
-# Only decode with raw2rgb.py --layout le10; a generic S*10P decoder
-# shows garbage.
+# BYTE LAYOUT: the driver writes each 10-bit sample in a little-endian
+# 16-bit word, value in the low bits (CAMSV FMT_SEL 0x102 / PAK 5), i.e.
+# the standard V4L2 unpacked 10-bit Bayer layout; decode with
+# raw2rgb.py --layout u16 (the same thing libcamera's software ISP
+# reads).  If the driver's fmt_sel/pak/bytes_per_px_x8 module parameters
+# are overridden, the layout changes and the decode must follow (e.g.
+# --layout le10 for PAK 1 with a 10-bit line).
 #
 # Tools: Arch Linux ARM packages  v4l-utils  (media-ctl, v4l2-ctl),
 # python (for raw2rgb.py).
@@ -33,7 +36,7 @@
 #                        [-p out.png] [-s WxH] [-e EXPOSURE] [-g GAIN]
 #                        [-t] [-c ov8856|s5k4h7]
 #   -c SENSOR   camera: ov8856 (default; cam0, rear, CSI port 1) or
-#               s5k4h7 (cam1; its CSI port is still a DT guess)
+#               s5k4h7 (cam1, assumed front, CSI port 2)
 #   -n FRAMES   frames to stream (default 10)
 #   -s WxH      sensor mode (default 640x480; ov8856 24 MHz modes:
 #               640x480, 1632x1224, 3264x2448; s5k4h7: 640x480,
@@ -183,8 +186,10 @@ if [ -z "$SENSORDEV" ]; then
 fi
 echo "== sensor: $SEL ($SENSORDEV), pad $SELSRC -> $SENINF pad $SENPAD"
 
-# Link selection: disable every other enabled sensor link first (the
-# driver refuses two enabled ones), then enable the chosen one.
+# Link selection: enabling the chosen sensor's link switches the seninf
+# selection by itself (the driver disables the previously enabled link
+# when not streaming); the explicit disable loop is kept for older
+# drivers that refuse a second enabled link with EBUSY.
 echo "== selecting $CAM"
 while IFS=$TAB read -r spad sname ssrc sen; do
 	[ -n "$spad" ] || continue
@@ -221,13 +226,13 @@ if [ "$GOTSIZE" != "${WIDTH}x${HEIGHT}" ]; then
 fi
 echo "== sensor bus code: $CODE"
 
-# Bus code -> packed fourcc on the video node, -> Bayer order for
-# raw2rgb.py.
+# Bus code -> unpacked 10-bit fourcc on the video node, -> Bayer order
+# for raw2rgb.py.
 case "$CODE" in
-SBGGR10_1X10) FOURCC=pBAA; BAYER=bggr ;;
-SGBRG10_1X10) FOURCC=pGAA; BAYER=gbrg ;;
-SGRBG10_1X10) FOURCC=pgAA; BAYER=grbg ;;
-SRGGB10_1X10) FOURCC=pRAA; BAYER=rggb ;;
+SBGGR10_1X10) FOURCC=BG10; BAYER=bggr ;;
+SGBRG10_1X10) FOURCC=GB10; BAYER=gbrg ;;
+SGRBG10_1X10) FOURCC=BA10; BAYER=grbg ;;
+SRGGB10_1X10) FOURCC=RG10; BAYER=rggb ;;
 *)
 	echo "error: unexpected bus code $CODE (need a 10-bit Bayer code)" >&2
 	exit 1
@@ -280,7 +285,7 @@ if ! $TIMEOUT v4l2-ctl -d "$VIDEO" --stream-mmap=4 --stream-count="$FRAMES" \
 fi
 [ -f "$OUT" ] || : >"$OUT"
 
-BPL=$((WIDTH * 10 / 8))
+BPL=$((WIDTH * 2))
 FRAME_BYTES=$((BPL * HEIGHT))
 TOTAL_BYTES=$((FRAME_BYTES * FRAMES))
 ACTUAL_BYTES=$(wc -c <"$OUT" | tr -d ' ')
@@ -307,10 +312,10 @@ fi
 if command -v python3 >/dev/null 2>&1 && [ -f "$HERE/raw2rgb.py" ]; then
 	# Decode the last complete frame: v4l2-ctl appends frames in order.
 	LAST=/tmp/mt6785-frame-last.raw
-	echo "== converting frame $NFRAMES to $PNG (stride $BPL, le10, $BAYER)"
+	echo "== converting frame $NFRAMES to $PNG (stride $BPL, u16, $BAYER)"
 	dd if="$OUT" of="$LAST" bs="$FRAME_BYTES" skip=$((NFRAMES - 1)) \
 		count=1 2>/dev/null
-	python3 "$HERE/raw2rgb.py" --layout le10 --stride "$BPL" \
+	python3 "$HERE/raw2rgb.py" --layout u16 --stride "$BPL" \
 		--bayer "$BAYER" "$LAST" "$WIDTH" "$HEIGHT" -o "$PNG"
 else
 	echo "note: python3/raw2rgb.py not found; skip PNG conversion" >&2

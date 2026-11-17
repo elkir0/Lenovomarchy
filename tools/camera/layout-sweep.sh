@@ -1,14 +1,13 @@
 #!/bin/sh
-# Sweep CAMSV packer layouts (FMT_SEL x PAK x bytes-per-pixel) to find one
-# libcamera's software ISP can read.
+# Sweep CAMSV packer layouts (FMT_SEL x PAK x bytes-per-pixel).
 #
-# WHY: with the measured FMT_SEL (0x514) = 0x102 / PAK (0x54c) = 1 the DMA
-# writes each line as a continuous little-endian 10-bit bit stream ("le10",
-# docs/hardware/CAMERA.md "Frame layout and first photo"), which no V4L2
-# fourcc describes and libcamera cannot decode.  The goal is a layout with
-# one 16-bit little-endian container per pixel and the 10-bit sample in the
-# low bits — exactly V4L2_PIX_FMT_SBGGR10, what libcamera's debayer reads
-# (docs/research/camera/T13-LIBCAMERA.md section 2).  The mt6785-camsv
+# WHY: the driver's default layout is the standard unpacked 10-bit Bayer
+# (FMT_SEL 0x102 / PAK 5 / 2 bytes per pixel, found by the 2026-11-17
+# sweep — docs/hardware/CAMERA.md "Standard 16-bit layout and autofocus
+# actuator"), which V4L2_PIX_FMT_S*10 describes and libcamera's software
+# ISP reads.  This tool sweeps OTHER combinations for experiments (e.g.
+# PAK 1 with a 10-bit line is the older continuous little-endian 10-bit
+# bit stream "le10", which no fourcc describes).  The mt6785-camsv
 # module exposes three parameters read at STREAMON:
 #
 #   /sys/module/mt6785_camsv/parameters/fmt_sel        FMT_SEL register value
@@ -16,16 +15,21 @@
 #   /sys/module/mt6785_camsv/parameters/bytes_per_px_x8  bytes/px * 8 for BPL
 #
 # For each candidate this script writes the parameters, captures 3
-# test-pattern frames at 640x480 through v4l2-capture.sh, saves them as
+# test-pattern frames at 640x480 through v4l2-capture.sh (full output
+# kept in /tmp/sweep-<...>.log), saves them as
 # /tmp/sweep-<fmt>-<pak>-<bpp>.raw and prints the first 24 bytes of line
-# 100 and line 101 in hex (plus a u16 LE word decode) and the camsv status
-# counters, so the resulting layout can be read off the output:
+# 100 and line 101 in hex (plus a u16 LE word decode) and the camsv
+# status counters, so the resulting layout can be read off the output:
 #
-#   - u16 low-10 target: words look like 0x02a3, 0x0310 (value < 0x400);
+#   - u16 low-10 (the driver default): words look like 0x02a3, 0x0310
+#     (value < 0x400);
 #   - u16 MSB-justified: words look like 0xa8c0, 0xc400 (low 6 bits ~ 0);
-#   - le10 (current): the u16 decode looks like garbage on both lines;
+#   - le10: the u16 decode looks like garbage on both lines;
 #   - p12: byte pattern 0x..ffc shifted;
 #   - nothing written / drop counters rising: that combination stalls.
+#
+# NOTE the driver warns in dmesg at STREAMON whenever a parameter
+# overrides the standard layout — that is expected during a sweep.
 #
 # Candidates come from the ISP 3.0 reference driver (MT8365,
 # src/begonia-ftp/camera/ref/isp30/) and what CAMERA.md measured on this
@@ -51,11 +55,13 @@ MODDIR=/sys/module/mt6785_camsv/parameters
 
 # fmt_sel:pak:bytes_per_px_x8 — comment = why the candidate is here.
 CANDIDATES='
-# controls: the two layouts measured on this tablet (CAMERA.md).
-0x102:1:10		le10 bitstream (current driver default; must reproduce)
+# controls: the standard layout (driver default, must reproduce) and the
+# two older layouts measured on this tablet (CAMERA.md).
+0x102:5:16		u16 unpacked (current driver default; must reproduce)
+0x102:1:10		le10 bitstream (the pre-sweep default)
 0x101:2:12		p12 containers, truncated at a 10-bit stride (reference)
 # FMT_SEL BIT(24) = IMGO_BUS_SIZE_16 in ISP 3.0, on top of the measured
-# RAW10 config: the main hope for a 2-byte container.
+# RAW10 config.
 0x1000102:1:16		BIT(24) + measured PAK 1, stride sized for u16
 0x1000102:2:16		BIT(24) + PAK 2 (ISP 3.0 RAW10 mode value, begonia value)
 0x1000102:0:16		BIT(24) + PAK 0 (ISP 3.0 RAW14 field value; nearest idle)
@@ -64,7 +70,7 @@ CANDIDATES='
 0x102:0:16		PAK 0, 2-byte stride
 # PAK BIT(2) = PAK_DBL_MODE_2_PIXELS (ISP 3.0), paired two ways.
 0x102:5:10		PAK 1|DBL, 10-bit stride
-0x102:5:16		PAK 1|DBL, 2-byte stride
+0x102:4:16		PAK 4 (DBL alone), 2-byte stride
 # remaining PAK field values and the remaining TG1_FMT low values.
 0x102:3:10		PAK 3 (ISP 3.0 RAW8 mode value)
 0x100:1:10		TG1_FMT field 0 (ISP 3.0 RAW8) + measured PAK 1
@@ -103,14 +109,15 @@ for f in "$MODDIR/fmt_sel" "$MODDIR/pak" "$MODDIR/bytes_per_px_x8"; do
 	fi
 done
 
-# Save the current values to restore at the end.
+# Save the current values to restore at the end (the defaults are
+# fmt_sel=0 pak=5 bytes_per_px_x8=16 on the post-2026-11-17 driver).
 SAVED_FMT=$(cat "$MODDIR/fmt_sel")
 SAVED_PAK=$(cat "$MODDIR/pak")
 SAVED_BPP=$(cat "$MODDIR/bytes_per_px_x8")
 restore() {
-	echo "$SAVED_FMT" >"$MODDIR/fmt_sel"
-	echo "$SAVED_PAK" >"$MODDIR/pak"
-	echo "$SAVED_BPP" >"$MODDIR/bytes_per_px_x8"
+	echo "$SAVED_FMT" >"$MODDIR/fmt_sel" || true
+	echo "$SAVED_PAK" >"$MODDIR/pak" || true
+	echo "$SAVED_BPP" >"$MODDIR/bytes_per_px_x8" || true
 }
 trap restore EXIT INT TERM
 
@@ -169,13 +176,26 @@ printf '%s\n' "$CANDIDATES" | while IFS= read -r line; do
 
 	echo "=================================================================="
 	printf '%-14s %-4s %-4s  %s (bpl %d)\n' "$FMT" "$PAKV" "$EFFBPP" "$OUT" "$BPL"
-	if ! "$HERE/v4l2-capture.sh" -d "$MEDIA" -c "$CAM" -n "$FRAMES" -s "${WIDTH}x${HEIGHT}" \
-		-t -o "$OUT" -p /dev/null 2>&1 | grep -E '^(==|error|warning)'; then
-		echo "warning: capture for $FMT/$PAKV/$BPPX8 failed" >&2
+	rm -f "$OUT"
+	# Full capture output to the log; the interesting lines echoed here.
+	# NOT `... | grep` inside `if !`: the exit status of a pipeline is the
+	# LAST command's, so `if ! capture | grep -E ...` tested GREP, not the
+	# capture (it "failed" exactly when the capture ran fine and printed
+	# its == lines), and the grep swallowed every other line — including
+	# the tool errors that explain a capture that never started (the
+	# 2026-11-17 tablet run: every candidate "no output file" while the
+	# same capture by hand worked).
+	LOG=${OUT%.raw}.log
+	if "$HERE/v4l2-capture.sh" -d "$MEDIA" -c "$CAM" -n "$FRAMES" -s "${WIDTH}x${HEIGHT}" \
+		-t -o "$OUT" -p /dev/null >"$LOG" 2>&1; then
+		echo "  capture ok (log: $LOG)"
+	else
+		echo "  warning: capture for $FMT/$PAKV/$BPPX8 exited nonzero (log: $LOG)" >&2
 	fi
+	grep -E '^(==|error|warning)' "$LOG" | sed 's/^/  /' || true
 	if [ -f "$OUT" ]; then
 		SZ=$(wc -c <"$OUT" | tr -d ' ')
-		echo "  file $SZ bytes (3 frames would be $((BPL * HEIGHT * FRAMES)))"
+		echo "  file $SZ bytes ($FRAMES frames would be $((BPL * HEIGHT * FRAMES)))"
 		echo "  line $LINE hex: $(hex24 "$OUT" "$BPL")"
 		echo "  line $LINE u16: $(u16decode "$OUT" "$BPL")"
 		NEXT=$((LINE + 1))

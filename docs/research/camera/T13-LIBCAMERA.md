@@ -4,12 +4,15 @@ State at the time of writing: the tablet has a working V4L2 media-controller
 pipeline `ov8856 2-0036` -> `mtk-mt6785-seninf` -> `mtk-mt6785-camsv` ->
 `mtk-mt6785-camsv video` (`/dev/video0`), and `v4l2-ctl` streams 640x480
 10-bit Bayer frames (docs/research/camera/T8-V4L2.md, [T3-UPSTREAM.md §3](T3-UPSTREAM.md)).
-The quirk to keep in mind throughout: with the measured IMGO configuration
-(`FMT_SEL` 0x514 = 0x102, `PAK` 0x54c = 1), each line is a continuous
-little-endian 10-bit bit stream (pixel k in bits 10k..10k+9) — the same
-size as MIPI RAW10, but not its byte layout. The driver exposes it as the
-V4L2 `S*10P` fourccs, which is a lie a generic decoder will notice
-(T8-V4L2.md §3; docs/hardware/CAMERA.md "Frame layout and first photo").
+**Update 2026-11-17 (T15): the layout quirk below is fixed in the kernel** —
+the CAMSV driver now defaults to FMT_SEL 0x102 / PAK 5 / 2 bytes per pixel
+and advertises only the unpacked `V4L2_PIX_FMT_S*10` fourccs, so §2's
+recommendation (a1) is implemented and this document's earlier "le10 exposed
+as S*10P" caveat is history (kept for the record). The original quirk, for
+reference: with `FMT_SEL` 0x514 = 0x102, `PAK` 0x54c = 1 and the line sized
+for 10 bits, each line was a continuous little-endian 10-bit bit stream
+(pixel k in bits 10k..10k+9) — the same size as MIPI RAW10, but not its
+byte layout — exposed (wrongly) as the V4L2 `S*10P` fourccs.
 
 This document covers: how the `simple` pipeline handler decides it supports
 a device (§1), what the software ISP's debayer accepts and what to do about
@@ -149,7 +152,21 @@ After the name match, `matchDevice()` → `locateSensors()` → per-sensor BFS
 The graph is exactly what T8 built: sensor -> seninf -> camsv subdev ->
 video node, all links enabled. No changes needed here.
 
-## 2. Formats: what the debayer accepts, and what to do about our le10 packing
+## 2. Formats: what the debayer accepts, and what was done about our le10 packing
+
+**Resolved 2026-11-17 (T15):** the sweep found the register combination
+(§2.2 a1 candidates: `FMT_SEL` 0x102 with `PAK` 5 — PAK 1 plus bit 2, the
+ISP 3.0 `PAK_DBL_MODE_2_PIXELS` flag — and the line sized for two bytes per
+pixel; docs/hardware/CAMERA.md "Standard 16-bit layout and autofocus
+actuator"). The mt6785-camsv driver now writes those values by default and
+advertises only `V4L2_PIX_FMT_SBGGR10`/`SGBRG10`/`SGRBG10`/`SRGGB10`
+(bytesperline = width * 2, sizeimage = bpl * height, colorspace raw,
+ENUM_FMT honouring the mbus_code filter, discrete frame sizes from the
+active sensor's modes with a continuous-range fallback). The `fmt_sel`,
+`pak` and `bytes_per_px_x8` module parameters remain for experiments and
+log a warning at STREAMON whenever they override the default. §2.3 (patch
+libcamera) is therefore not needed. The text below is the original
+analysis.
 
 ### 2.1 Accepted input formats of the software ISP today (v0.7.2)
 
@@ -563,43 +580,38 @@ with build/test instructions. See that directory.
 ## 5. Kernel-side checklist for the driver's author
 
 What libcamera (v0.7.2, simple + soft IPA, per the above) needs from the
-kernel side, in rough priority order:
+kernel side, in rough priority order. Statuses below reflect the tree
+after T15 (2026-11-17).
 
-1. **[Blocking] CAMSV output in a standard layout — 16-bit unpacked
-   `V4L2_PIX_FMT_S*10`** (§2). Sweep the un-tried FMT_SEL/PAK/STRIDE
-   combinations for a 2-byte container mode (candidates:
-   `FMT_SEL` bit 24 `IMGO_BUS_SIZE_16`; `PAK_EN` cleared in MODULE_EN
-   with TG1_FMT RAW10; ISP 3.0-style bus-size bits, possibly at
-   `IMGO_CON2/CON3` 0x40/0x44). Export `bytesperline = width * 2`,
-   `sizeimage = bpl * height`. Until then, everything downstream of
-   "frames flow" (debayer quality) is broken by the le10-as-S*10P lie.
-2. **[Blocking] Media device driver name** stays `mtk-mt6785-seninf`
+1. **[Done 2026-11-17] CAMSV output in a standard layout — 16-bit
+   unpacked `V4L2_PIX_FMT_S*10`** (§2). The sweep found FMT_SEL 0x102 /
+   PAK 5 / 2 bytes per pixel; the driver now writes those by default and
+   advertises only the unpacked fourccs with `bytesperline = width * 2`,
+   `sizeimage = bpl * height`. The override parameters remain
+   (experiments) and log when used.
+2. **[Done] Media device driver name** stays `mtk-mt6785-seninf`
    (the patch matches it). If the platform driver is ever renamed, the
-   libcamera entry must follow. Consider setting
-   `media_device.driver_name` explicitly for independence from the
-   platform driver name.
+   libcamera entry must follow. Setting `media_device.driver_name`
+   explicitly is still open (cosmetic; not needed while the platform
+   driver name matches).
 3. **[Done] Graph/API basics**: `V4L2_SUBDEV_FL_HAS_DEVNODE` on both
    subdevs (present), `V4L2_CAP_IO_MC` on the video node (present),
-   working `ENUM_FMT`, `ENUM_FRAMESIZES` continuous, `S_FMT/G_FMT` on
-   all pads, `link_validate`. One latent gap: because the node sets
-   `V4L2_CAP_IO_MC`, the V4L2 core passes `VIDIOC_ENUM_FMT`'s
-   `mbus_code` filter through (v4l2-ioctl.c `v4l_enum_fmt` only zeroes
-   it when IO_MC is unset), but `camsv_enum_fmt()` ignores it and
-   returns every fourcc regardless of the requested code. With a single
-   bus code per format today that is indistinguishable from correct
-   behaviour; when a second media bus code is ever supported
-   (e.g. SGRBG10 from the 19.2 MHz ov8856 modes), `camsv_enum_fmt`
-   must filter `f->mbus_code`, or libcamera's `tryPipeline()` will
-   build configurations pairing the wrong fourcc with the sensor code.
-4. **[Blocking for AGC] Sensor controls** — all present on ov8856
-   (§3.5). Verify `V4L2_CID_EXPOSURE`'s reported range updates with the
-   mode (libcamera caches min/max at configure time), and that
-   `PIXEL_RATE`/`HBLANK`/`VBLANK` are read-consistent (they are, from
-   the driver's mode tables).
-5. **[Recommended] DT `orientation`** (and later `rotation`) on the
-   ov8856 node (§3.5) so `Location`/`Rotation` properties are right for
-   Hyprland/browsers. One-line DTS change.
-6. **[Recommended] Selection targets on the sensor**: implement
+   working `ENUM_FMT` (now honouring the `mbus_code` filter — the latent
+   gap below is closed), `ENUM_FRAMESIZES` (now discrete sizes from the
+   active sensor through the seninf's new `enum_frame_size`, continuous
+   range fallback when no sensor is reachable), `S_FMT/G_FMT` on
+   all pads, `link_validate`, colorspace raw on the node and pads.
+   `get_selection` on the sensors stays open (see item 6).
+4. **[Done] Sensor controls** — all five mandatory ones present on both
+   sensors (ov8856: §3.5; s5k4h7: PIXEL_RATE, HBLANK, VBLANK, EXPOSURE,
+   ANALOGUE_GAIN all registered). `V4L2_CID_EXPOSURE`'s range updates
+   with the mode on both drivers.
+5. **[Done] DT `orientation` + `rotation`** on both sensor nodes
+   (cam0 OV8856: back, rotation 90; cam1 S5K4H7: front — assumed,
+   rotation 270), marked provisional in the DTS comments. The
+   `Location`/`Rotation` properties should now be right; verify against
+   the real images and adjust.
+6. **[Open, non-blocking] Selection targets on the sensors**: implement
    `get_selection` (CROP_BOUNDS = full pixel array, CROP_DEFAULT =
    active area, CROP = current mode's window) to silence the libcamera
    warnings and give correct `PixelArraySize` /
@@ -609,13 +621,12 @@ kernel side, in rough priority order:
    `width`/`height` (the driver has no explicit crop-offset fields, so
    CROP would default to the mode size anchored at 0,0 until the mode
    tables gain offsets).
-7. **[Recommended] Multi-buffer / continuous-streaming readiness**: the
-   CAMSV FBC re-arm-per-frame-IRQ flow (T8 §2.2) completes buffers one at
-   a time; libcamera queues 4-8 buffers and expects them returned in
-   order with `sequence` and a monotonic timestamp. Confirm
-   `VIDIOC_REQBUFS`/`QBUF`/`DQBUF` with >= 4 queued buffers sustains
-   30 fps without the FBC stall (the experiments' fix: write `FBC_EN`
-   then `FBC_EN|RCNT_INC` per frame).
+7. **[Done] Multi-buffer / continuous-streaming readiness**: the
+   zero-copy per-frame IMGO_BASE_ADDR flow delivers buffers in order
+   with `sequence` and a monotonic timestamp; the FBC compare value is
+   kept ahead of the written count (T8 §0i), so no stall. 20 distinct
+   frames at 640x480 and full-size modes verified by content on the
+   tablet (CAMERA.md "Both cameras through V4L2").
 8. **[Later] Buffer allocation**: the video node currently uses
    `vb2_dma_contig` (contiguous CMA, MMAP). libcamera's simple handler
    first tries `importBuffers()` (DMABUF) and falls back to
@@ -632,13 +643,19 @@ kernel side, in rough priority order:
    udmabuf serves first light — fine, but enabling
    `CONFIG_DMABUF_HEAPS=y` + `CONFIG_DMABUF_HEAPS_SYSTEM=y` later
    matches what libcamera prefers.
-9. **[Later] The second sensor (S5K4H7)**: needs a CSI port 2 sink pad
-   wiring and its own `CameraSensorProperties`/helper entries
-   (neither exists upstream) — same pattern as §3.2/§3.3.
-10. **[Never] Do not expose the 12-bit-container `p12` mode or the le10
-    layout under a standard fourcc** once (1) lands; keep the le10
-    layout available behind a debug module parameter if the experiment
-    tools still need it.
+9. **[Partly done] The second sensor (S5K4H7)**: bound and capturing
+   through CAMSV0 (CSI port 2, verified on hardware), DT orientation
+   added, the seninf's one-enabled-link rule now switches the selection
+   automatically when its link is enabled (so libcamera's own
+   `setupLinks()` can select it without a disable-first dance). Its
+   `CameraSensorProperties`/helper entries do not exist upstream
+   (same pattern as §3.2/§3.3) — open, non-blocking (AGC treats the
+   raw control value as the gain).
+10. **[Done] No non-standard layout under a standard fourcc**: the
+    driver advertises only the unpacked fourccs it actually writes; the
+    le10 layout is reachable only through the override parameters,
+    which log a warning. The 12-bit-container `p12` mode is not
+    advertised.
 
 ---
 
@@ -694,3 +711,29 @@ kernel side, in rough priority order:
   `src/mt6785-mainline/drivers/media/i2c/ov8856.c`,
   `src/begonia-ftp/camera/ref/isp30/src/` (mtk_camsv_video.c,
   mtk_camsv_hw.c, mtk_camsv_reg.h, mtk_seninf.c).
+
+## 6. Remaining work on the tablet (2026-11-17, after T15)
+
+The kernel side is aligned (unpacked 10-bit fourccs, discrete frame
+sizes, mbus_code-filtered ENUM_FMT, DT orientation/rotation, sensor
+link auto-switch). What is left is install and look:
+
+1. Build and install the kernel + modules from the T15 tree
+   (`kernel/kbuild.sh`, then Image.gz + DTB + `modules.tar.xz` to the
+   tablet as usual) and reboot.
+2. Sanity: `v4l2-ctl -d /dev/video0 --list-formats` must show only
+   `BG10/GB10/BA10/RG10` ("10-bit Bayer unpacked, 2 bytes per
+   sample"); `tools/camera/v4l2-capture.sh -n 3 -t` must still capture
+   (now decoding with `--layout u16` by default).
+3. Build and install this package (`image/camera/libcamera-yt11/`,
+   README §"Building on the tablet").
+4. `cam -l` — expect `1: Internal back camera
+   (/soc/i2c@11009000/camera-sensor@36)` (or the equivalent DT path)
+   and no "Recommended V4L2 control not supported" warning.
+5. `cam -c 1 --capture=5 --file=frame-#.ppm` — real pictures at
+   640x480; the OV8856 colour bars make the check unambiguous. Then
+   `qcam` and the PipeWire path (README §"Testing" items 3-4).
+6. Judgement calls only possible with images: the DT `rotation` values
+   (provisional), the S5K4H7's assumed front position, and the
+   autofocus actuator question (CAMERA.md "Standard 16-bit layout and
+   autofocus actuator").
