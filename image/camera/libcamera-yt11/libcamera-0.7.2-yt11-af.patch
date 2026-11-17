@@ -1,17 +1,15 @@
 simple: add contrast autofocus to the soft IPA
 
 ---
- .../internal/software_isp/swisp_stats.h       |   8 +
- src/ipa/simple/algorithms/af.cpp              | 284 ++++++++++++++++++
- src/ipa/simple/algorithms/af.h                |  70 +++++
- src/ipa/simple/algorithms/meson.build         |   3 +-
- src/ipa/simple/data/uncalibrated.yaml         |   3 +
- src/ipa/simple/ipa_context.h                  |   5 +
- src/ipa/simple/soft_simple.cpp                |  19 +-
- src/libcamera/software_isp/swstats_cpu.cpp    |  15 +-
- 8 files changed, 399 insertions(+), 8 deletions(-)
- create mode 100644 src/ipa/simple/algorithms/af.cpp
- create mode 100644 src/ipa/simple/algorithms/af.h
+  .../libcamera/internal/software_isp/swisp_stats.h  |   8 +
+  src/ipa/simple/algorithms/af.cpp                   | 312 +++++++++++++++++++++
+  src/ipa/simple/algorithms/af.h                     |  75 +++++
+  src/ipa/simple/algorithms/meson.build              |   3 +-
+  src/ipa/simple/data/uncalibrated.yaml              |   3 +
+  src/ipa/simple/ipa_context.h                       |   5 +
+  src/ipa/simple/soft_simple.cpp                     |  19 +-
+  src/libcamera/software_isp/swstats_cpu.cpp         |  15 +-
+  8 files changed, 432 insertions(+), 8 deletions(-)
 
 diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
 index d9d0d9b..d7dc715 100644
@@ -34,10 +32,10 @@ index d9d0d9b..d7dc715 100644
  } /* namespace libcamera */
 diff --git a/src/ipa/simple/algorithms/af.cpp b/src/ipa/simple/algorithms/af.cpp
 new file mode 100644
-index 0000000..d567b2f
+index 0000000..4f0f139
 --- /dev/null
 +++ b/src/ipa/simple/algorithms/af.cpp
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,312 @@
 +/* SPDX-License-Identifier: LGPL-2.1-or-later */
 +/*
 + * Copyright (C) 2026, Lenovomarchy contributors
@@ -84,6 +82,9 @@ index 0000000..d567b2f
 +static constexpr double kDefaultRetriggerRatio = 0.7;
 +static constexpr uint32_t kDefaultRetriggerFrames = 3;
 +
++/* Statistics events with an unchanged exposure before a sweep starts. */
++static constexpr uint32_t kStableFrames = 3;
++
 +Af::Af()
 +	: coarseStep_(kDefaultCoarseStep), fineStep_(kDefaultFineStep),
 +	  settleFrames_(kDefaultSettleFrames),
@@ -92,6 +93,7 @@ index 0000000..d567b2f
 +	  afMode_(controls::AfModeManual), afState_(controls::AfStateIdle),
 +	  scanState_(ScanState::Idle), settleCounter_(0), bestFocus_(0),
 +	  bestSharpness_(0), hasBest_(false), fineMin_(0), fineMax_(0),
++	  lastExposure_(0), lastGain_(0), stableCount_(0),
 +	  focusSharpness_(0), retriggerCount_(0)
 +{
 +}
@@ -170,6 +172,10 @@ index 0000000..d567b2f
 +		settleCounter_ = 0;
 +		afState_ = controls::AfStateIdle;
 +		retriggerCount_ = 0;
++
++		/* Continuous mode starts with a sweep, then watches sharpness. */
++		if (afMode_ == controls::AfModeContinuous)
++			startScan(context);
 +	}
 +
 +	const auto &afTrigger = controls.get(controls::AfTrigger);
@@ -215,6 +221,24 @@ index 0000000..d567b2f
 +		return;
 +
 +	if (afMode_ == controls::AfModeManual)
++		return;
++
++	/*
++	 * Sharpness is only comparable at one exposure, and a dark, noisy frame
++	 * scores high once divided by its brightness: a sweep does not take its
++	 * first measurement before the AGC has held still.
++	 */
++	const auto &agc = context.activeState.agc;
++	if (agc.exposure != lastExposure_ || agc.again != lastGain_) {
++		lastExposure_ = agc.exposure;
++		lastGain_ = agc.again;
++		stableCount_ = 0;
++	} else if (stableCount_ < kStableFrames) {
++		stableCount_++;
++	}
++
++	if (scanState_ == ScanState::Coarse && !hasBest_ &&
++	    stableCount_ < kStableFrames)
 +		return;
 +
 +	/* Wait for the lens to settle and the statistics to refresh. */
@@ -326,10 +350,10 @@ index 0000000..d567b2f
 +} /* namespace libcamera */
 diff --git a/src/ipa/simple/algorithms/af.h b/src/ipa/simple/algorithms/af.h
 new file mode 100644
-index 0000000..bfd0eb3
+index 0000000..2df568f
 --- /dev/null
 +++ b/src/ipa/simple/algorithms/af.h
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,75 @@
 +/* SPDX-License-Identifier: LGPL-2.1-or-later */
 +/*
 + * Copyright (C) 2026, Lenovomarchy contributors
@@ -392,6 +416,11 @@ index 0000000..bfd0eb3
 +	int32_t fineMin_;
 +	int32_t fineMax_;
 +
++	/* Exposure seen at the last statistics, and for how long it has held. */
++	int32_t lastExposure_;
++	double lastGain_;
++	uint32_t stableCount_;
++
 +	/* Continuous mode retrigger bookkeeping. */
 +	uint64_t focusSharpness_;
 +	uint32_t retriggerCount_;
@@ -444,7 +473,7 @@ index a24ca41..41f8ef9 100644
  
  	struct {
 diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
-index a022ba9..7f2e40d 100644
+index bbe2af4..e5af2de 100644
 --- a/src/ipa/simple/soft_simple.cpp
 +++ b/src/ipa/simple/soft_simple.cpp
 @@ -125,6 +125,7 @@ int IPASoftSimple::init(const IPASettings &settings,
@@ -542,6 +571,3 @@ index 7fb77ce..d56b584 100644
  		}
  
  		sharedStats_->sum_ >>= sumShift_;
--- 
-2.52.0
-

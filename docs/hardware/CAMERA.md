@@ -308,3 +308,34 @@ minutes on the eight cores) and installed:
   lens during `configure()`, before the proxy was running (fatal
   assertion); two `std::min`/`std::max` calls mixed signed and unsigned;
   sharpness was not normalised by brightness.
+
+## Camera app (omacam) and continuous autofocus (2026-11-17)
+
+- Omarchy Mobile's camera app, `omacam` 0.3.3-1, is installed on the
+  tablet from `pkgs.omamobile.org/stable/aarch64` (sha256 matches the
+  repository index, signature good against the release key in upstream's
+  git tree), with `gst-plugins-good`, `gst-plugins-ugly`,
+  `gst-plugin-pipewire` and `pipewire-libcamera` from Arch Linux ARM. It
+  links against the tablet's own libcamera 0.7.2 build. Not in the image
+  build yet.
+- It opens on the rear camera, upright, with the 1x/2x/5x zoom buttons,
+  Night/Photo/Video/Pro modes and the front-camera switch drawn. Only the
+  viewfinder was checked: no photo, video or front-camera switch was
+  tried (the shutter makes a sound).
+- libcamera 0.7.2-4.5, three changes found with the app:
+  - the app asks for `AfModeContinuous` in the controls given to
+    `Camera::start()`, which the simple pipeline dropped: they now go to
+    the IPA with the first request;
+  - continuous mode starts with a sweep (it only reacted to a sharpness
+    drop after a first sweep, so it never started);
+  - a sweep waits until exposure and gain have been unchanged for three
+    statistics: started on the first frames, it took the dark, noisy
+    frames for the sharpest and stayed at 0.
+- With these the lens goes 0, 240 ... 960, then 260 ... 340 and settles
+  at 320 about 18 s after the app starts (sweep 12 s after a 6 s wait),
+  and the viewfinder is sharp. `cam` with `AfMode: 2`: 3 runs in 3 end
+  at 320.
+- Reading the lens while libcamera holds it:
+  `v4l2-ctl -d /dev/v4l-subdev2 --get-ctrl focus_absolute`. omacam sets
+  `LIBCAMERA_LOG_FILE=syslog`: libcamera's log is in the journal.
+

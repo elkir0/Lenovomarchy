@@ -1,13 +1,16 @@
 simple: support manual focus through the LensPosition control
 
+Also hand the controls given to Camera::start() to the IPA with the
+first request.
+
 ---
- .../internal/software_isp/software_isp.h      |   3 +
- include/libcamera/ipa/soft.mojom              |   4 +-
- src/ipa/simple/ipa_context.h                  |  13 ++
- src/ipa/simple/soft_simple.cpp                | 117 ++++++++++++++++++
- src/libcamera/pipeline/simple/simple.cpp      |  39 +++++-
- src/libcamera/software_isp/software_isp.cpp   |   8 ++
- 6 files changed, 181 insertions(+), 3 deletions(-)
+  .../libcamera/internal/software_isp/software_isp.h |   3 +
+  include/libcamera/ipa/soft.mojom                   |   4 +-
+  src/ipa/simple/ipa_context.h                       |  13 +++
+  src/ipa/simple/soft_simple.cpp                     | 117 +++++++++++++++++++++
+  src/libcamera/pipeline/simple/simple.cpp           |  60 ++++++++++-
+  src/libcamera/software_isp/software_isp.cpp        |   8 ++
+  6 files changed, 200 insertions(+), 5 deletions(-)
 
 diff --git a/include/libcamera/internal/software_isp/software_isp.h b/include/libcamera/internal/software_isp/software_isp.h
 index 4f72dce..0102cc3 100644
@@ -88,7 +91,7 @@ index 8ccfacb..a24ca41 100644
  		uint8_t level;
  		int32_t lastExposure;
 diff --git a/src/ipa/simple/soft_simple.cpp b/src/ipa/simple/soft_simple.cpp
-index 629e1a3..a022ba9 100644
+index 629e1a3..bbe2af4 100644
 --- a/src/ipa/simple/soft_simple.cpp
 +++ b/src/ipa/simple/soft_simple.cpp
 @@ -5,6 +5,7 @@
@@ -281,7 +284,7 @@ index 629e1a3..a022ba9 100644
  
  	/* Sanity check */
 diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
-index 716537d..b6a3a28 100644
+index 716537d..8455cff 100644
 --- a/src/libcamera/pipeline/simple/simple.cpp
 +++ b/src/libcamera/pipeline/simple/simple.cpp
 @@ -33,6 +33,7 @@
@@ -292,15 +295,16 @@ index 716537d..b6a3a28 100644
  #include "libcamera/internal/camera_manager.h"
  #include "libcamera/internal/camera_sensor.h"
  #include "libcamera/internal/camera_sensor_properties.h"
-@@ -342,6 +343,7 @@ public:
+@@ -342,6 +343,8 @@ public:
  	 */
  	std::list<Entity> entities_;
  	std::unique_ptr<CameraSensor> sensor_;
 +	CameraLens *lens_;
++	std::optional<ControlList> startControls_;
  	V4L2VideoDevice *video_;
  	V4L2Subdevice *frameStartEmitter_;
  
-@@ -373,6 +375,7 @@ private:
+@@ -373,6 +376,7 @@ private:
  	void ispStatsReady(uint32_t frame, uint32_t bufferId);
  	void metadataReady(uint32_t frame, const ControlList &metadata);
  	void setSensorControls(const ControlList &sensorControls);
@@ -308,7 +312,7 @@ index 716537d..b6a3a28 100644
  };
  
  class SimpleCameraConfiguration : public CameraConfiguration
-@@ -470,7 +473,8 @@ private:
+@@ -470,7 +474,8 @@ private:
  SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
  				   unsigned int numStreams,
  				   MediaEntity *sensor)
@@ -318,7 +322,7 @@ index 716537d..b6a3a28 100644
  {
  	/*
  	 * Find the shortest path from the camera sensor to a video capture
-@@ -566,6 +570,8 @@ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
+@@ -566,6 +571,8 @@ SimpleCameraData::SimpleCameraData(SimplePipelineHandler *pipe,
  	if (!sensor_)
  		return;
  
@@ -327,7 +331,7 @@ index 716537d..b6a3a28 100644
  	const CameraSensorProperties::SensorDelays &delays = sensor_->sensorDelays();
  	std::unordered_map<uint32_t, DelayedControls::ControlParams> params = {
  		{ V4L2_CID_ANALOGUE_GAIN, { delays.gainDelay, false } },
-@@ -616,7 +622,10 @@ int SimpleCameraData::init()
+@@ -616,7 +623,10 @@ int SimpleCameraData::init()
  	 * Instantiate Soft ISP if this is enabled for the given driver and no converter is used.
  	 */
  	if (!converter_ && pipe->swIspEnabled()) {
@@ -339,7 +343,7 @@ index 716537d..b6a3a28 100644
  		if (!swIsp_->isValid()) {
  			LOG(SimplePipeline, Warning)
  				<< "Failed to create software ISP, disabling software debayering";
-@@ -627,6 +636,7 @@ int SimpleCameraData::init()
+@@ -627,6 +637,7 @@ int SimpleCameraData::init()
  			swIsp_->ispStatsReady.connect(this, &SimpleCameraData::ispStatsReady);
  			swIsp_->metadataReady.connect(this, &SimpleCameraData::metadataReady);
  			swIsp_->setSensorControls.connect(this, &SimpleCameraData::setSensorControls);
@@ -347,7 +351,7 @@ index 716537d..b6a3a28 100644
  		}
  	}
  
-@@ -665,6 +675,16 @@ int SimpleCameraData::init()
+@@ -665,6 +676,16 @@ int SimpleCameraData::init()
  
  	properties_ = sensor_->properties();
  
@@ -364,7 +368,7 @@ index 716537d..b6a3a28 100644
  	/* Find the first subdev that can generate a frame start signal, if any. */
  	frameStartEmitter_ = nullptr;
  	for (const Entity &entity : entities_) {
-@@ -1059,6 +1079,21 @@ void SimpleCameraData::setSensorControls(const ControlList &sensorControls)
+@@ -1059,6 +1080,21 @@ void SimpleCameraData::setSensorControls(const ControlList &sensorControls)
  	}
  }
  
@@ -386,6 +390,43 @@ index 716537d..b6a3a28 100644
  /* Retrieve all source pads connected to a sink pad through active routes. */
  std::vector<const MediaPad *> SimpleCameraData::routedSourcePads(MediaPad *sink)
  {
+@@ -1628,9 +1664,18 @@ int SimplePipelineHandler::exportFrameBuffers(Camera *camera, Stream *stream,
+ 		return data->video_->exportBuffers(count, buffers);
+ }
+ 
+-int SimplePipelineHandler::start(Camera *camera, [[maybe_unused]] const ControlList *controls)
++int SimplePipelineHandler::start(Camera *camera, const ControlList *controls)
+ {
+ 	SimpleCameraData *data = cameraData(camera);
++
++	/*
++	 * The IPA only takes controls with a request: keep the ones given to
++	 * Camera::start() (an application's focus mode, for instance) for
++	 * the first request.
++	 */
++	data->startControls_.reset();
++	if (controls && !controls->empty())
++		data->startControls_ = *controls;
+ 	V4L2VideoDevice *video = data->video_;
+ 	V4L2Subdevice *frameStartEmitter = data->frameStartEmitter_;
+ 	int ret;
+@@ -1762,8 +1807,15 @@ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+ 	data->frameInfo_.create(request, metadataRequired);
+ 	if (data->useConversion_) {
+ 		data->conversionQueue_.push({ request, std::move(buffers) });
+-		if (data->swIsp_)
++		if (data->swIsp_) {
++			if (data->startControls_) {
++				request->controls().merge(*data->startControls_,
++							  ControlList::MergePolicy::KeepExisting);
++				data->startControls_.reset();
++			}
++
+ 			data->swIsp_->queueRequest(request->sequence(), request->controls());
++		}
+ 	}
+ 
+ 	return 0;
 diff --git a/src/libcamera/software_isp/software_isp.cpp b/src/libcamera/software_isp/software_isp.cpp
 index c73a16c..a09593f 100644
 --- a/src/libcamera/software_isp/software_isp.cpp
@@ -426,6 +467,3 @@ index c73a16c..a09593f 100644
  void SoftwareIsp::statsReady(uint32_t frame, uint32_t bufferId)
  {
  	ispStatsReady.emit(frame, bufferId);
--- 
-2.52.0
-

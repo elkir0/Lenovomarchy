@@ -94,9 +94,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.4-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.4-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.4-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.5-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.5-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.5-aarch64.pkg.tar.xz
 ```
 
 Notes:
