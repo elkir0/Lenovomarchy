@@ -89,6 +89,15 @@ else
     echo "4.0.6" > "$HOME_DIR/.local/state/omarchy/version"
 fi
 
+# A fresh install already holds the end state of every shipped migration.
+# Upstream's omarchy-provision-user marks them all as applied for a new user;
+# 'alarm' exists before Omarchy is installed, so do the same here. Without it
+# omarchy-migrate-notify reports every migration as pending at each login.
+mkdir -p "$HOME_DIR/.local/state/omarchy/migrations"
+for migration in "$OMARCHY_PATH"/migrations/*.sh; do
+    [[ -f $migration ]] && touch "$HOME_DIR/.local/state/omarchy/migrations/$(basename "$migration")"
+done
+
 echo "==> [omarchy-user-setup] Setting ownership of $HOME_DIR to $USER_NAME:$USER_NAME"
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR"
 
