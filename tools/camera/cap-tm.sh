@@ -4,13 +4,14 @@
 #
 # Ported from begonia camsv/cap1.sh. Requires root and mt6785-camsv-tm loaded.
 # Usage:
-#   sudo sh cap-tm.sh [-w WIDTH] [-l HEIGHT] [-k PACK] [-o OUT_RAW] [-p OUT_PNG] [-n]
+#   sudo sh cap-tm.sh [-w WIDTH] [-l HEIGHT] [-k LAYOUT] [-o OUT_RAW] [-p OUT_PNG] [-n]
 #
-# PACK=12 (default) configures the IMGO DMA for 12-bit containers (2 px / 3
-# bytes, 10-bit sample << 2), which is what the MT6785 packer emits for a
-# RAW10 sensor stream with FMT_SEL=0x102 / PAK=1 (see T9-RAWTOOLS.md); each
-# line is W*12/8 bytes. PACK=10 keeps the legacy assumption (MIPI RAW10,
-# FMT_SEL=0x101 / PAK=2, W*10/8 bytes per line) for comparison.
+# LAYOUT=le10 (default) configures the IMGO DMA the way the complete frame was
+# measured on YT-J706F (FMT_SEL 0x102 / PAK 1, line sized for 10 bits:
+# W*10/8 bytes; the DMA writes a continuous little-endian 10-bit bit stream
+# per line). LAYOUT=p12 keeps the old begonia values (FMT_SEL 0x101 / PAK 2,
+# W*12/8-byte lines holding 12-bit containers, truncated to 2/3 of the
+# pixels on a 10-bit-sized line) for reference; see T9-RAWTOOLS.md.
 
 set -eu
 
@@ -19,7 +20,7 @@ D=/sys/kernel/debug/camsv-tm
 
 W=${W:-640}
 L=${L:-480}
-PACK=${PACK:-12}
+LAYOUT=${LAYOUT:-le10}
 OUT=${OUT:-/tmp/tm-frame.raw}
 PNG=${PNG:-}
 NO_PNG=0
@@ -27,10 +28,10 @@ FILL=${FILL:-0xa5}
 
 usage() {
 	cat <<EOF
-usage: $0 [-w WIDTH] [-l HEIGHT] [-k PACK] [-o OUT_RAW] [-p OUT_PNG] [-n] [-h]
+usage: $0 [-w WIDTH] [-l HEIGHT] [-k LAYOUT] [-o OUT_RAW] [-p OUT_PNG] [-n] [-h]
   -w WIDTH    frame width in pixels (default: 640)
   -l HEIGHT   frame height in lines (default: 480)
-  -k PACK     bits per pixel containers: 10 or 12 (default: 12)
+  -k LAYOUT   byte layout: le10 or p12 (default: le10)
   -o OUT_RAW  output raw file (default: /tmp/tm-frame.raw)
   -p OUT_PNG  output grayscale PNG file (default: <OUT_RAW>.png)
   -n          do not generate a PNG
@@ -41,7 +42,7 @@ while getopts "w:l:k:o:p:nh" opt; do
 	case "$opt" in
 		w) W=$OPTARG ;;
 		l) L=$OPTARG ;;
-		k) PACK=$OPTARG ;;
+		k) LAYOUT=$OPTARG ;;
 		o) OUT=$OPTARG ;;
 		p) PNG=$OPTARG ;;
 		n) NO_PNG=1 ;;
@@ -50,10 +51,10 @@ while getopts "w:l:k:o:p:nh" opt; do
 	esac
 done
 
-case "$PACK" in
-	10) BPL=$((W * 10 / 8)); FMT=101; PAK=2 ;;
-	12) BPL=$((W * 12 / 8)); FMT=102; PAK=1 ;;
-	*) echo "error: PACK must be 10 or 12 (got $PACK)" >&2; exit 2 ;;
+case "$LAYOUT" in
+	le10) BPL=$((W * 10 / 8)); FMT=102; PAK=1 ;;
+	p12) BPL=$((W * 12 / 8)); FMT=101; PAK=2 ;;
+	*) echo "error: LAYOUT must be le10 or p12 (got $LAYOUT)" >&2; exit 2 ;;
 esac
 
 if [ "$NO_PNG" -eq 0 ] && [ -z "$PNG" ]; then
@@ -121,7 +122,7 @@ sleep 0.05
 r camsv 520
 w camsv 520 0
 
-# --- CAMSV0 TG window + IMGO DMA (FMT/PAK/BPL follow PACK; env overrides stay)
+# --- CAMSV0 TG window + IMGO DMA (FMT/PAK/BPL follow LAYOUT; env overrides stay)
 w camsv 238 "$(printf '%08x' $((W << 16)))"
 w camsv 23c "$(printf '%08x' $((L << 16)))"
 w camsv 20 "${PH#0x}"
@@ -183,5 +184,5 @@ else:
 PY
 
 if [ "$NO_PNG" -eq 0 ]; then
-	python3 "$DIR/raw2png.py" "$OUT" "$W" "$L" --pack "$PACK" "$BPL" "$PNG"
+	python3 "$DIR/raw2png.py" "$OUT" "$W" "$L" --layout "$LAYOUT" "$BPL" "$PNG"
 fi

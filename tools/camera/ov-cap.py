@@ -353,23 +353,29 @@ def setup_phy_seninf(csi_port: int, seninf: int, mux: int, lanes: int, settle: i
     rmw('seninf', 0x410, 0, 0x1F)
 
 
-def setup_camsv0(phys: int, w_px: int, l_ln: int, pack: int = 12) -> int:
+def setup_camsv0(phys: int, w_px: int, l_ln: int, layout: str = 'le10') -> int:
     """Configure CAMSV0 TG + IMGO DMA for a w_px x l_ln RAW10 sensor stream.
 
-    pack selects the IMGO byte layout:
-      - 10: true MIPI RAW10 packing, bpl = w*10/8 (PAK=2, TG1_FMT=1). The
-        MT6785 with these register values emits 12-bit containers instead
-        (see below), so this mode is only for trying HW bit 3 (PAK_SEL) or
-        other packer knobs; expect the same 12-bit layout unless they bite.
-      - 12 (default): 12-bit containers, 2 px / 3 bytes, sample << 2,
-        bpl = w*12/8. This matches what the hardware writes with
-        FMT_SEL=0x101 / PAK=2 (measured 2026-11-16, T9-RAWTOOLS.md).
+    layout selects the IMGO byte layout:
+      - 'le10' (default, measured 2026-11-16, docs/hardware/CAMERA.md):
+        FMT_SEL = 0x102, PAK = 1, line sized for 10 bits (bpl = w*10/8).
+        The DMA writes a continuous little-endian 10-bit bit stream per line
+        (pixel k in bits 10k..10k+9); the frame is complete.
+      - 'p12' (old begonia values, kept for reference): FMT_SEL = 0x101,
+        PAK = 2, bpl = w*12/8. The hardware writes 12-bit containers
+        (2 px / 3 bytes, 10-bit sample << 2), so a line sized for 10 bits
+        holds only 2/3 of the pixels (truncation; see T9-RAWTOOLS.md).
     """
-    if pack not in (10, 12):
-        raise ValueError(f'pack must be 10 or 12, got {pack}')
-    bpl = w_px * pack // 8
-    fmt_sel = 0x101 if pack == 10 else 0x102  # TG1_FMT: 1=RAW10, 2=RAW12
-    pak = 2 if pack == 10 else 1              # PAK mode: 2=RAW10, 1=RAW12
+    if layout not in ('le10', 'p12'):
+        raise ValueError(f'layout must be le10 or p12, got {layout!r}')
+    if layout == 'le10':
+        bpl = w_px * 10 // 8
+        fmt_sel = 0x102  # measured: complete frame at 10-bit line size
+        pak = 1          # measured PAK mode for FMT_SEL=0x102
+    else:
+        bpl = w_px * 12 // 8
+        fmt_sel = 0x101  # begonia values (TG1_FMT=1, RAW10)
+        pak = 2
     for off, val in ((0x230, 0), (0x234, 0), (0x510, 0x40000000), (0x110, 0)):
         w('camsv', off, val)
     for val in (4, 0, 1):
@@ -433,10 +439,13 @@ def main() -> int:
                     help='OV8856 analogue gain (128..2047 or Nx, 0x3508..0x3509) applied before stream-on')
     ap.add_argument('--frames', type=int, default=1,
                     help='Keep streaming for N frames and save the Nth frame (default 1)')
-    ap.add_argument('--pack', type=int, choices=(10, 12), default=12,
-                    help='IMGO byte packing: 10 = MIPI RAW10 (w*10/8 B/line), '
-                         '12 = 12-bit containers w*12/8 B/line (what the HW '
-                         'emits; default 12)')
+    ap.add_argument('--layout', choices=('le10', 'p12'), default='le10',
+                    help='IMGO byte layout: le10 = FMT_SEL 0x102 / PAK 1 with '
+                         'the line sized for 10 bits, bpl = w*10/8 (default, '
+                         'the complete-frame layout measured on this board); '
+                         'p12 = old begonia values FMT_SEL 0x101 / PAK 2, '
+                         'bpl = w*12/8 (12-bit containers, truncated on a '
+                         '10-bit-sized line; reference only)')
     ap.add_argument('--settle', type=lambda x: int(x, 0), default=15,
                     help='DPHY HS-settle register value (default 15)')
     ap.add_argument('--w', type=int, default=640, help='Frame width in pixels (default 640)')
@@ -493,7 +502,7 @@ def main() -> int:
             f.write('1')
         subprocess.check_call([sys.executable, os.path.join(HERE, 'larb-bypass.py')])
 
-        bpl = args.w * args.pack // 8
+        bpl = args.w * (10 if args.layout == 'le10' else 12) // 8
         need_buf = max(0x200000, bpl * args.l)
         cur_sz = int(open(DBG + '/buf').read().split()[3], 16)
         if cur_sz < need_buf:
@@ -511,14 +520,14 @@ def main() -> int:
         if args.stream_first:
             sw(fd, args.i2c_addr, 0x0100, 1)
             time.sleep(0.1)
-            setup_camsv0(phys, args.w, args.l, args.pack)
+            setup_camsv0(phys, args.w, args.l, args.layout)
         else:
-            setup_camsv0(phys, args.w, args.l, args.pack)
+            setup_camsv0(phys, args.w, args.l, args.layout)
             sw(fd, args.i2c_addr, 0x0100, 1)
     finally:
         os.close(fd)
 
-    print(f'IMGO: pack={args.pack}, {bpl} bytes/line ({args.w} px), '
+    print(f'IMGO: layout={args.layout}, {bpl} bytes/line ({args.w} px), '
           f'frame = {bpl * args.l} bytes')
     time.sleep(0.3)
     # Multi-frame: the single-frame path arms FBC once (FBC_EN | RCNT_INC) and
@@ -565,7 +574,7 @@ def main() -> int:
     if args.png:
         subprocess.check_call([
             sys.executable, os.path.join(HERE, 'raw2png.py'),
-            args.out, str(args.w), str(args.l), '--pack', str(args.pack),
+            args.out, str(args.w), str(args.l), '--layout', args.layout,
             str(bpl), args.png,
         ])
     return 0
