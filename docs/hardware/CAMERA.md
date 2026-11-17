@@ -265,3 +265,20 @@ minutes on the eight cores) and installed:
   out upright.
 - libcamera does not drive the focus actuator: the rear picture of a
   close subject is blurred unless `focus_absolute` is set by hand.
+
+## Auto-exposure tuning (2026-11-17)
+
+- Package 0.7.2-4.3: `libcamera-0.7.2-yt11-agc.patch` makes the soft
+  IPA's exposure loop tunable and `ov8856.yaml` / `s5k4h7.yaml` are
+  installed as tuning files (no more fallback warning).
+- With gain 0.35, step cap 0.35 and dead band 0.1 the loop settles in 6
+  to 13 corrections, 1 to 2 s, where the stock values needed about 110
+  (15 s). Statistics still come every fourth frame.
+- Target 2.0 left the picture washed (front camera output mean about
+  135 of 255, gain 11.7x, 2416 lines). Target 1.6, the value kept, gives
+  about 100 of 255 at 1559 lines and the same gain, with the windows
+  less blown out. The rear camera, pointed at a white page, gives 136.
+- Colours stay dull and slightly green: there is no colour matrix, and
+  making one needs a colour chart under known light.
+- The 4.3 packages on the tablet were built with target 2.0; the
+  installed tuning files were then replaced by the 1.6 ones by hand.

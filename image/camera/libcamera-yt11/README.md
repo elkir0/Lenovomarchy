@@ -59,6 +59,17 @@ defaults:
   nm, `testPatternModes` matching the kernel drivers'
   `V4L2_CID_TEST_PATTERN` menus, and `sensorDelays` (`{ 2, 2, 2, 2 }`).
 
+### Auto-exposure tuning (`libcamera-0.7.2-yt11-agc.patch`, `ov8856.yaml`, `s5k4h7.yaml`)
+
+The patch lets the soft IPA's tuning file set four `Agc` parameters
+(`proportionalGain`, `maxStep`, `optimalExposure`, `deadband`); without
+them the behaviour is the stock one. The two tuning files, installed in
+`/usr/share/libcamera/ipa/simple/`, make the loop settle in 1 to 2 s
+instead of about 15 s and aim lower (`optimalExposure: 1.6`), which
+keeps the highlights. They hold no colour matrix: colours stay dull
+until the sensors are characterized. Analysis in
+`docs/research/camera/T18-LIBCAMERA-AGC.md`.
+
 ## Building on the tablet
 
 Copy this directory to the tablet (it has no other repo dependencies)
@@ -68,9 +79,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.2-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.2-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.2-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.3-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.3-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.3-aarch64.pkg.tar.xz
 ```
 
 Notes:

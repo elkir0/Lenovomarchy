@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+      # 0x40 at 10 bits, expressed on the 16-bit scale the tuning parser
+      # expects (blc.cpp shifts right by 8): 64 << 6 = 4096, the same
+      # value the CameraSensorHelper for ov8856 provides. Writing it
+      # explicitly also freezes the black-level auto-estimation.
+      blackLevel: 4096
+  - Awb:
+  # No Ccm: colour matrices need per-sensor characterization (see
+  # docs/research/camera/T18-LIBCAMERA-AGC.md).
+  - Adjust:
+  - Agc:
+      # Measured on the tablet in a daylight room: the stock defaults
+      # (0.04 / 0.15 / 0.2 / 2.5) take ~110 steps (15 s) to crawl from
+      # the sensor defaults to maximum exposure and gain and stay there
+      # overexposed. With 0.35 / 0.35 the loop settles in 6 to 13 steps
+      # (1 to 2 s). Target 2.0 still gave a washed picture (output mean
+      # ~135/255); 1.6 gives ~100/255 and keeps the highlights.
+      proportionalGain: 0.35
+      maxStep: 0.35
+      deadband: 0.1
+      optimalExposure: 1.6
+...

@@ -1,0 +1,104 @@
+diff --git a/src/ipa/simple/algorithms/agc.cpp b/src/ipa/simple/algorithms/agc.cpp
+index a13a755..1643906 100644
+--- a/src/ipa/simple/algorithms/agc.cpp
++++ b/src/ipa/simple/algorithms/agc.cpp
+@@ -43,45 +43,54 @@ static constexpr float kExposureSatisfactory = 0.2;
+  * Proportional gain for exposure/gain adjustment. Maps the MSV error to a
+  * multiplicative correction factor:
+  *
+- *   factor = 1.0 + kExpProportionalGain * error
++ *   factor = 1.0 + proportionalGain * error
+  *
+- * With kExpProportionalGain = 0.04:
+- *   - max error ~2.5 -> factor 1.10 (~10% step, same as before)
+- *   - error 1.0      -> factor 1.04 (~4% step)
+- *   - error 0.3      -> factor 1.012 (~1.2% step)
+- *
+- * This replaces the fixed 10% bang-bang step with a proportional correction
+- * that converges smoothly and avoids overshooting near the target.
++ * The tuning file can raise it (together with maxStep) to converge several
++ * times faster: with the default 0.04 an error of 1.0 only corrects 4% per
++ * step and reaching the target from a dark start takes tens of seconds.
+  */
+-static constexpr float kExpProportionalGain = 0.04;
++static constexpr float kDefaultProportionalGain = 0.04;
+ 
+ /*
+- * Maximum multiplicative step per frame, to bound the correction when the
+- * scene changes dramatically.
++ * Maximum multiplicative step per correction, to bound the correction when
++ * the scene changes dramatically.
+  */
+-static constexpr float kExpMaxStep = 0.15;
++static constexpr float kDefaultMaxStep = 0.15;
+ 
+ Agc::Agc()
+ {
+ }
+ 
++int Agc::init([[maybe_unused]] IPAContext &context, const ValueNode &tuningData)
++{
++	proportionalGain_ = tuningData["proportionalGain"].get<float>(kDefaultProportionalGain);
++	maxStep_ = tuningData["maxStep"].get<float>(kDefaultMaxStep);
++	optimalExposure_ = tuningData["optimalExposure"].get<float>(kExposureOptimal);
++	satisfactory_ = tuningData["deadband"].get<float>(kExposureSatisfactory);
++
++	return 0;
++}
++
+ void Agc::updateExposure(IPAContext &context, IPAFrameContext &frameContext, double exposureMSV)
+ {
+ 	int32_t &exposure = frameContext.sensor.exposure;
+ 	double &again = frameContext.sensor.gain;
+ 
+-	double error = kExposureOptimal - exposureMSV;
++	double error = optimalExposure_ - exposureMSV;
+ 
+-	if (std::abs(error) <= kExposureSatisfactory)
++	if (std::abs(error) <= satisfactory_)
+ 		return;
+ 
+ 	/*
+-	 * Compute a proportional correction factor. The sign of the error
+-	 * determines the direction: positive error means too dark (increase),
+-	 * negative means too bright (decrease).
++	 * Proportional correction: the sign of the error determines the
++	 * direction (positive error means too dark, negative too bright) and
++	 * the magnitude follows the error until maxStep clamps it, so large
++	 * errors (e.g. after a scene change or at startup) converge in a few
++	 * steps while small errors settle smoothly without wobbling around
++	 * the target.
+ 	 */
+-	float step = std::clamp(static_cast<float>(error) * kExpProportionalGain,
+-				-kExpMaxStep, kExpMaxStep);
++	float step = std::clamp(static_cast<float>(error) * proportionalGain_,
++				-maxStep_, maxStep_);
+ 	float factor = 1.0f + step;
+ 
+ 	if (factor > 1.0f) {
+diff --git a/src/ipa/simple/algorithms/agc.h b/src/ipa/simple/algorithms/agc.h
+index 112d9f5..b9a43fc 100644
+--- a/src/ipa/simple/algorithms/agc.h
++++ b/src/ipa/simple/algorithms/agc.h
+@@ -19,6 +19,8 @@ public:
+ 	Agc();
+ 	~Agc() = default;
+ 
++	int init(IPAContext &context, const ValueNode &tuningData) override;
++
+ 	void process(IPAContext &context, const uint32_t frame,
+ 		     IPAFrameContext &frameContext,
+ 		     const SwIspStats *stats,
+@@ -26,6 +28,12 @@ public:
+ 
+ private:
+ 	void updateExposure(IPAContext &context, IPAFrameContext &frameContext, double exposureMSV);
++
++	/* Tunable parameters, defaults matching the compiled-in constants. */
++	float proportionalGain_;
++	float maxStep_;
++	float optimalExposure_;
++	float satisfactory_;
+ };
+ 
+ } /* namespace ipa::soft::algorithms */

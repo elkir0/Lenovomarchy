@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+      # 64 at 10 bits on the 16-bit scale the tuning parser expects
+      # (blc.cpp shifts right by 8): 64 << 6 = 4096, the same value the
+      # CameraSensorHelper for s5k4h7 provides.
+      blackLevel: 4096
+  - Awb:
+  # No Ccm: colour matrices need per-sensor characterization (see
+  # docs/research/camera/T18-LIBCAMERA-AGC.md).
+  - Adjust:
+  - Agc:
+      # Same scheme as ov8856.yaml, see the notes there; the two
+      # sensors have the same 10-bit output and black level.
+      proportionalGain: 0.35
+      maxStep: 0.35
+      deadband: 0.1
+      optimalExposure: 1.6
+...
