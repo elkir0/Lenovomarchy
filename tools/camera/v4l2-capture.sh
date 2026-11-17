@@ -2,48 +2,95 @@
 # Capture raw frames from the MT6785 camera pipeline through the V4L2
 # media controller (mt6785-seninf + mt6785-camsv modules):
 #
-#   ov8856 -> mtk-mt6785-seninf -> mtk-mt6785-camsv -> /dev/videoN
+#   sensor -> mtk-mt6785-seninf (selector) -> mtk-mt6785-camsv -> /dev/videoN
 #
-# Sets the pipeline formats with media-ctl, streams N frames with
-# v4l2-ctl into one file and converts the first frame to PNG with
-# raw2png.py (same directory).
+# Selects the sensor (-c): the seninf is an input selector, every bound
+# sensor has a link to the sink pad of its CSI port and at most one of
+# those links may be enabled (the driver refuses a second one), so the
+# script disables the other enabled sensor link, then enables the chosen
+# one.  It then sets the sensor mode (-s), reads back the media bus code
+# the sensor actually uses (media-ctl --get-v4l2), sets the same code and
+# size on the seninf sink and camsv sink pads, the matching packed fourcc
+# on the video node, streams N frames and converts the last one to a PNG
+# with raw2rgb.py --layout le10 --bayer <order>.
+#
+# FOURCC/BAYER MAP (bus code -> video fourcc -> raw2rgb --bayer):
+#   SBGGR10_1X10 -> pBAA -> bggr
+#   SGBRG10_1X10 -> pGAA -> gbrg
+#   SGRBG10_1X10 -> pgAA -> grbg
+#   SRGGB10_1X10 -> pRAA -> rggb
+#
+# BYTE LAYOUT WARNING: the driver labels its format S*10P, but the
+# hardware writes a continuous little-endian 10-bit bit stream per line
+# (pixel k in bits 10k..10k+9), NOT the MIPI RAW10 layout of S*10P.
+# Only decode with raw2rgb.py --layout le10; a generic S*10P decoder
+# shows garbage.
 #
 # Tools: Arch Linux ARM packages  v4l-utils  (media-ctl, v4l2-ctl),
-# python (for raw2png.py).
+# python (for raw2rgb.py).
 #
 # Usage: v4l2-capture.sh [-d /dev/media0] [-n frames] [-o out.raw]
-#                        [-p out.png] [-w width] [-h height]
+#                        [-p out.png] [-s WxH] [-e EXPOSURE] [-g GAIN]
+#                        [-t] [-c ov8856|s5k4h7]
+#   -c SENSOR   camera: ov8856 (default; cam0, rear, CSI port 1) or
+#               s5k4h7 (cam1; its CSI port is still a DT guess)
+#   -n FRAMES   frames to stream (default 10)
+#   -s WxH      sensor mode (default 640x480; ov8856 24 MHz modes:
+#               640x480, 1632x1224, 3264x2448; s5k4h7: 640x480,
+#               1632x1224, 3264x1836, 3264x2448)
+#   -e LINES    sensor exposure in lines (range: v4l2-ctl -l on the
+#               sensor subdev; ov8856 640x480: max 614)
+#   -g GAIN     sensor analogue gain (ov8856: 128..2047)
+#   -t          sensor test pattern (colour bars); without -t it is off
+#   -o FILE     raw output (default /tmp/mt6785-frame.raw)
+#   -p FILE     PNG of the last frame (default /tmp/mt6785-frame.png)
+#   -d DEV      media device (default /dev/media0)
 # Run as root (or with write access to the media and video nodes).
 
 set -eu
 
 MEDIA=/dev/media0
 FRAMES=10
-WIDTH=640
-HEIGHT=480
+SIZE=640x480
 OUT=/tmp/mt6785-frame.raw
 PNG=/tmp/mt6785-frame.png
-# Default Bayer order matches the ov8856 24 MHz 640x480 mode (SBGGR10).
-FMT=SBGGR10P
-MBUS=SBGGR10_1X10
+EXPOSURE=
+GAIN=
+TESTPAT=0
+CAM=ov8856
 
 usage() {
-	sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,/^# Run as root/p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 }
 
-while getopts d:n:o:p:w:h: opt; do
+while getopts d:n:o:p:s:e:g:tc: opt; do
 	case "$opt" in
 	d) MEDIA=$OPTARG ;;
 	n) FRAMES=$OPTARG ;;
 	o) OUT=$OPTARG ;;
 	p) PNG=$OPTARG ;;
-	w) WIDTH=$OPTARG ;;
-	h) HEIGHT=$OPTARG ;;
+	s) SIZE=$OPTARG ;;
+	e) EXPOSURE=$OPTARG ;;
+	g) GAIN=$OPTARG ;;
+	t) TESTPAT=1 ;;
+	c) CAM=$OPTARG ;;
 	*) usage ;;
 	esac
 done
 shift $((OPTIND - 1))
+
+case "$SIZE" in
+[0-9]*x[0-9]*) ;;
+*) echo "error: -s wants WxH (e.g. 640x480)" >&2; exit 1 ;;
+esac
+WIDTH=${SIZE%x*}
+HEIGHT=${SIZE#*x}
+
+case "$CAM" in
+ov8856 | s5k4h7) ;;
+*) echo "error: -c wants ov8856 or s5k4h7" >&2; exit 1 ;;
+esac
 
 for tool in media-ctl v4l2-ctl; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
@@ -53,48 +100,218 @@ for tool in media-ctl v4l2-ctl; do
 done
 
 HERE=$(dirname "$0")
+TAB=$(printf '\t')
+
+# Entity names as the drivers register them: the subdev is
+# "mtk-mt6785-camsv" and the video node entity is
+# "mtk-mt6785-camsv video" (distinct on purpose).
+SENINF="mtk-mt6785-seninf"
+CAMSV="mtk-mt6785-camsv"
+VIDEONENT="mtk-mt6785-camsv video"
 
 echo "== media graph ($MEDIA)"
 media-ctl -d "$MEDIA" -p
 
-# Entity and pad names as the mt6785-cam drivers register them.
-VIDEO=$(media-ctl -d "$MEDIA" -e "mtk-mt6785-camsv")
+# Device node of the entity named exactly $1 (empty if none).
+devnode() {
+	media-ctl -d "$MEDIA" -p | awk -v want="$1" '
+		/^- entity / {
+			line = $0
+			sub(/^- entity [0-9]+: /, "", line)
+			sub(/ \(.*$/, "", line)
+			inent = (line == want)
+			next
+		}
+		inent && /device node name/ { print $NF; exit }'
+}
+
+VIDEO=$(devnode "$VIDEONENT")
 if [ -z "$VIDEO" ]; then
-	# Fall back to the first capture node of the media device.
-	VIDEO=$(media-ctl -d "$MEDIA" -p | awk '
-		/entity [0-9]+:/ { ent = $0 }
-		- entity .* Video Capture$/{ print prev; exit }
-		{ prev = ent }')
-	VIDEO=${VIDEO##*/}
-fi
-if [ -z "$VIDEO" ]; then
-	echo "error: no video capture entity in $MEDIA" >&2
+	echo "error: entity \"$VIDEONENT\" not found in $MEDIA" >&2
 	exit 1
 fi
-VIDEO=/dev/$VIDEO
 echo "== capture node: $VIDEO"
 
-# Format the whole pipeline: sensor -> seninf -> camsv subdev -> video.
-media-ctl -d "$MEDIA" -V "\"ov8856 2-0036\":0 [fmt:$MBUS/${WIDTH}x${HEIGHT}]"
-media-ctl -d "$MEDIA" -V '"mtk-mt6785-seninf":0 [fmt:'"$MBUS/${WIDTH}x${HEIGHT}"']'
-media-ctl -d "$MEDIA" -V '"mtk-mt6785-seninf":3 [fmt:'"$MBUS/${WIDTH}x${HEIGHT}"']'
-media-ctl -d "$MEDIA" -V '"mtk-mt6785-camsv":0 [fmt:'"$MBUS/${WIDTH}x${HEIGHT}"']'
+# Every sensor link of the seninf, enabled or not, one per line:
+#   <seninf sink pad> TAB <sensor entity> TAB <sensor pad> TAB <1 if enabled>
+# media-ctl -p prints them under the seninf's "padN:" headings as
+#   <- "ov8856 2-0036":0 [ENABLED]     (a disabled link shows [])
+# The heading, not the :N after the name, is the seninf sink pad.
+LINKS=$(media-ctl -d "$MEDIA" -p | awk -v sd="$SENINF" '
+	/^- entity / {
+		line = $0
+		sub(/^- entity [0-9]+: /, "", line)
+		sub(/ \(.*$/, "", line)
+		insd = (line == sd)
+		next
+	}
+	insd && /^[[:space:]]*pad[0-9]+:/ {
+		p = $0
+		sub(/^[[:space:]]*pad/, "", p); sub(/:.*/, "", p)
+		curpad = p
+		next
+	}
+	insd && /<- "/ {
+		s = $0
+		sub(/^.*<- "/, "", s)
+		name = s; sub(/".*$/, "", name)
+		rest = s; sub(/^[^"]*":/, "", rest)
+		srcpad = rest; sub(/[^0-9].*$/, "", srcpad)
+		en = index(rest, "ENABLED") > 0 ? 1 : 0
+		printf "%s\t%s\t%s\t%d\n", curpad, name, srcpad, en
+	}')
 
-v4l2-ctl -d "$VIDEO" --set-fmt-video=width="$WIDTH",height="$HEIGHT",pixelformat=$FMT
+SEL=
+SENPAD=
+SELSRC=
+while IFS=$TAB read -r spad sname ssrc sen; do
+	[ -n "$spad" ] || continue
+	case "$sname" in
+	"$CAM"*) SEL=$sname; SENPAD=$spad; SELSRC=$ssrc ;;
+	esac
+done <<EOF
+$LINKS
+EOF
+if [ -z "$SEL" ]; then
+	echo "error: no \"$CAM\" sensor linked to $SENINF (is it bound? see dmesg)" >&2
+	exit 1
+fi
+SENSORDEV=$(devnode "$SEL")
+if [ -z "$SENSORDEV" ]; then
+	echo "error: sensor \"$SEL\" has no subdev node" >&2
+	exit 1
+fi
+echo "== sensor: $SEL ($SENSORDEV), pad $SELSRC -> $SENINF pad $SENPAD"
+
+# Link selection: disable every other enabled sensor link first (the
+# driver refuses two enabled ones), then enable the chosen one.
+echo "== selecting $CAM"
+while IFS=$TAB read -r spad sname ssrc sen; do
+	[ -n "$spad" ] || continue
+	if [ "$sen" = 1 ] && [ "$spad" != "$SENPAD" ]; then
+		echo "   disabling \"$sname\":$ssrc -> \"$SENINF\":$spad"
+		media-ctl -d "$MEDIA" -l "\"$sname\":$ssrc -> \"$SENINF\":$spad [0]"
+	fi
+done <<EOF
+$LINKS
+EOF
+media-ctl -d "$MEDIA" -l "\"$SEL\":$SELSRC -> \"$SENINF\":$SENPAD [1]"
+
+# Sensor mode: keep the sensor's own bus code in the request (the code
+# depends on the sensor and its flips), ask for the geometry, then read
+# back what it actually took.  media-ctl also propagates the result to
+# the seninf sink pad over the enabled link.
+cur_fmt() {
+	media-ctl -d "$MEDIA" --get-v4l2 "\"$1\":$2"
+}
+CODE=$(cur_fmt "$SEL" "$SELSRC" | sed -n 's/.*fmt:\([A-Z0-9_]*\)\/.*/\1/p')
+echo "== sensor format request ${WIDTH}x${HEIGHT} (code ${CODE:-?})"
+media-ctl -d "$MEDIA" -V "\"$SEL\":$SELSRC [fmt:${CODE:-SBGGR10_1X10}/${WIDTH}x${HEIGHT}]"
+GOT=$(cur_fmt "$SEL" "$SELSRC")
+echo "$GOT"
+CODE=$(echo "$GOT" | sed -n 's/.*fmt:\([A-Z0-9_]*\)\/.*/\1/p')
+GOTSIZE=$(echo "$GOT" | sed -n 's/.*fmt:[A-Z0-9_]*\/\([0-9]*x[0-9]*\).*/\1/p')
+if [ -z "$CODE" ]; then
+	echo "error: could not read the sensor's bus code" >&2
+	exit 1
+fi
+if [ "$GOTSIZE" != "${WIDTH}x${HEIGHT}" ]; then
+	echo "error: sensor refused ${WIDTH}x${HEIGHT} (took $GOTSIZE); pick one of its modes (-s)" >&2
+	exit 1
+fi
+echo "== sensor bus code: $CODE"
+
+# Bus code -> packed fourcc on the video node, -> Bayer order for
+# raw2rgb.py.
+case "$CODE" in
+SBGGR10_1X10) FOURCC=pBAA; BAYER=bggr ;;
+SGBRG10_1X10) FOURCC=pGAA; BAYER=gbrg ;;
+SGRBG10_1X10) FOURCC=pgAA; BAYER=grbg ;;
+SRGGB10_1X10) FOURCC=pRAA; BAYER=rggb ;;
+*)
+	echo "error: unexpected bus code $CODE (need a 10-bit Bayer code)" >&2
+	exit 1
+	;;
+esac
+
+# Sensor controls after the mode: a mode change resets vblank and with
+# it the exposure range.  The test pattern sticks across streams, so it
+# is switched off explicitly without -t.
+if [ "$TESTPAT" = 1 ]; then
+	v4l2-ctl -d "$SENSORDEV" --set-ctrl test_pattern=1
+else
+	v4l2-ctl -d "$SENSORDEV" --set-ctrl test_pattern=0 || true
+fi
+if [ -n "$EXPOSURE" ]; then
+	v4l2-ctl -d "$SENSORDEV" --set-ctrl "exposure=$EXPOSURE"
+fi
+if [ -n "$GAIN" ]; then
+	v4l2-ctl -d "$SENSORDEV" --set-ctrl "analogue_gain=$GAIN"
+fi
+
+# Pads down the pipeline: the seninf sink of the selected port (its
+# source mirrors it), the camsv sink (validated against the seninf
+# source at STREAMON), then the video node, whose S_FMT also sets the
+# camsv pads from the fourcc.
+media-ctl -d "$MEDIA" -V "\"$SENINF\":$SENPAD [fmt:$CODE/${WIDTH}x${HEIGHT}]"
+media-ctl -d "$MEDIA" -V "\"$CAMSV\":0 [fmt:$CODE/${WIDTH}x${HEIGHT}]"
+echo "== seninf source / camsv sink:"
+cur_fmt "$SENINF" 3
+cur_fmt "$CAMSV" 0
+
+# Video node: v4l2-ctl wants the fourcc characters.
+v4l2-ctl -d "$VIDEO" --set-fmt-video=width="$WIDTH",height="$HEIGHT",pixelformat=$FOURCC
 v4l2-ctl -d "$VIDEO" -V
 
 echo "== streaming $FRAMES frames"
-v4l2-ctl -d "$VIDEO" --stream-mmap=4 --stream-count="$FRAMES" \
-	--stream-to="$OUT" --verbose
-
-echo "== saved $OUT ($(wc -c <"$OUT") bytes)"
-v4l2-ctl -d "$VIDEO" --log-status || true
-
-if [ -x "$(command -v python3)" ] && [ -f "$HERE/raw2png.py" ]; then
-	BPL=$((WIDTH * 10 / 8))
-	echo "== converting first frame to $PNG (stride $BPL)"
-	dd if="$OUT" of=/tmp/frame1.raw bs="$((BPL * HEIGHT))" count=1 2>/dev/null
-	python3 "$HERE/raw2png.py" /tmp/frame1.raw "$WIDTH" "$HEIGHT" "$BPL" "$PNG"
+# A stalled stream would block v4l2-ctl forever: bound it (generous: a
+# second per frame plus 10 s) so the status dumps below still run.  If
+# it is cut short, its last partial 4 KiB stdio block is lost, so the
+# file can end mid-frame (only whole frames are decoded below).
+LIMIT=$((FRAMES + 10))
+if command -v timeout >/dev/null 2>&1; then
+	TIMEOUT="timeout $LIMIT"
 else
-	echo "note: python3/raw2png.py not found; skip PNG conversion" >&2
+	TIMEOUT=
+fi
+if ! $TIMEOUT v4l2-ctl -d "$VIDEO" --stream-mmap=4 --stream-count="$FRAMES" \
+	--stream-to="$OUT" --verbose; then
+	echo "warning: v4l2-ctl failed or was stopped after ${LIMIT}s (stalled stream?)" >&2
+fi
+[ -f "$OUT" ] || : >"$OUT"
+
+BPL=$((WIDTH * 10 / 8))
+FRAME_BYTES=$((BPL * HEIGHT))
+TOTAL_BYTES=$((FRAME_BYTES * FRAMES))
+ACTUAL_BYTES=$(wc -c <"$OUT" | tr -d ' ')
+NFRAMES=$((ACTUAL_BYTES / FRAME_BYTES))
+echo "== saved $OUT ($ACTUAL_BYTES of $TOTAL_BYTES expected bytes, $NFRAMES frames of $FRAME_BYTES)"
+
+if [ "$ACTUAL_BYTES" != "$TOTAL_BYTES" ]; then
+	echo "warning: byte count mismatch (dropped or short frames?)" >&2
+fi
+
+# Debugfs status of both halves, for the log.
+for f in /sys/kernel/debug/mt6785-seninf-status /sys/kernel/debug/mt6785-camsv-status; do
+	if [ -r "$f" ]; then
+		echo "== $f"
+		cat "$f"
+	fi
+done
+
+if [ "$NFRAMES" -lt 1 ]; then
+	echo "error: no complete frame in $OUT" >&2
+	exit 1
+fi
+
+if command -v python3 >/dev/null 2>&1 && [ -f "$HERE/raw2rgb.py" ]; then
+	# Decode the last complete frame: v4l2-ctl appends frames in order.
+	LAST=/tmp/mt6785-frame-last.raw
+	echo "== converting frame $NFRAMES to $PNG (stride $BPL, le10, $BAYER)"
+	dd if="$OUT" of="$LAST" bs="$FRAME_BYTES" skip=$((NFRAMES - 1)) \
+		count=1 2>/dev/null
+	python3 "$HERE/raw2rgb.py" --layout le10 --stride "$BPL" \
+		--bayer "$BAYER" "$LAST" "$WIDTH" "$HEIGHT" -o "$PNG"
+else
+	echo "note: python3/raw2rgb.py not found; skip PNG conversion" >&2
 fi

@@ -103,7 +103,8 @@ With the `mt6785-seninf-tm` / `mt6785-camsv-tm` modules and
   lines and analogue gain 2047 shows the room: the first photo from this
   tablet on mainline (rear-facing camera = cam0, out of focus: the VCM
   is not driven). Samples: `tools/camera/samples/*-le10.raw`.
-- `ov-cap.py --frames N` works since it re-arms FBC for each frame.
+- `ov-cap.py --frames N` returns a frame, but always the first one of the
+  stream (see the FBC section below).
 
 ## FBC and interrupts (2026-11-17)
 
@@ -122,7 +123,32 @@ frames per second) and `/dev/mem` pokes at CAMSV0:
   frame rate. Turning FBC off and on, resetting the IMGO DMA, or writing
   bits 8, 16 or 22 does not release it. So `ov-cap.py --frames N` only
   ever stored its first frame.
-- With the low field at 2, 3 or 4 the DMA writes every frame: the drop
-  count freezes and CTL2[7:0] counts frames, with [23:16] one behind. The
-  low field is a buffer count, not the "RCNT_INC" strobe the begonia notes
-  took it for.
+- The low field of CTL1 is a compare value, not the "RCNT_INC" strobe the
+  begonia notes took it for: CTL2[6:0] counts the frames written (it
+  wraps through 0) and the DMA stops, dropping frames, exactly when that
+  count equals the compare value, or always when the compare value is 0.
+  Written once, 2 gives two frames and 0x3f gives 63. Nothing was found
+  that decrements the count. The V4L2 driver keeps the compare value 8
+  ahead of the count at every PASS1_DON, which makes the DMA free-running.
+- `IMGO_BASE_ADDR` (+0x20) written during vertical blanking applies to
+  the next frame: each frame lands in its own buffer (zero copy).
+
+## Both cameras through V4L2 (2026-11-17)
+
+Driver `drivers/media/platform/mediatek/mt6785-cam/` (kernel `yt11`
+31acd55e6 and the next commit), `tools/camera/v4l2-capture.sh`:
+
+- OV8856 (cam0, CSI port 1, 2 lanes): 20 of 20 distinct frames at
+  640x480, 6 of 6 at 1632x1224, 4 of 4 at 3264x2448 (TG sees one extra
+  line in each mode), all checked by content. The full-size mode needs a
+  larger CMA pool than the 32 MB default (160 MB used).
+- S5K4H7 (cam1, 4 lanes, 700 MHz): nothing on CSI port 0 (PACKET_CNT 0);
+  on **CSI port 2** (SENINF4) it delivers 5 of 5 frames at 640x480 and 8
+  of 8 at 1632x1224 (GRBG). Its picture in the dark room is black with
+  one faint spot: not yet judged in light. Its exposure control tops at
+  626 lines and its analogue gain at 512.
+- One sensor at a time: the seninf has one enabled sink link, switched
+  with `media-ctl -l` (the script's `-c ov8856|s5k4h7`).
+- Open: frames are a little-endian 10-bit bit stream exposed as `S*10P`
+  (libcamera's software ISP cannot read it), the autofocus VCM at 0x0c is
+  not driven, LARB MMU is bypassed, no picture has been taken in light.
