@@ -20,6 +20,10 @@
 card=${1:-0}
 amixer -q -c "$card" cset name='ADDA_DL_CH1 DL1_CH1' on
 amixer -q -c "$card" cset name='ADDA_DL_CH2 DL1_CH2' on
+# The microphones' front end (UL2, PCM device 5) needs the same: route the
+# voice processor's I2S2 to it, or the probe drops the microphone profile.
+amixer -q -c "$card" cset name='UL2_CH1 I2S2_CH1' on
+amixer -q -c "$card" cset name='UL2_CH2 I2S2_CH2' on
 amixer -q -c "$card" cset name='I2S1_HD_Mux' Low_Jitter
 amixer -q -c "$card" cset name='I2S2_HD_Mux' Low_Jitter
 

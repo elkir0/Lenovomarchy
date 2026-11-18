@@ -13,7 +13,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Block | State | Notes |
 |---|---|---|
 | Boot (LK, `boot_a`, root on `userdata`) | works | Keyless fastboot through the preloader; `fastboot boot` unusable (`docs/hardware/INVENTORY.md`) |
-| Display (Himax HX83102P, DSI) | works | `docs/hardware/DISPLAY.md` |
+| Display (Himax HX83102P, DSI) | partial | `docs/hardware/DISPLAY.md`; seen by the owner on 2026-11-18: in landscape the leftmost ~3 mm repeat the picture found ~4 mm further right, over the whole height |
 | Backlight (LM36274-class) | works | Off before suspend through `bl_power` |
 | Touch (Himax, zero-flash) | works | `docs/design/TOUCH.md`; firmware extracted from the unit |
 | Pen (Precision Pen 2, through the touch chip) | untested | No pen at hand so far |
@@ -21,7 +21,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Wi-Fi (MT7663 SDIO) | works | 2.4 GHz measured; 5 GHz not measured |
 | Bluetooth (MT7663 SDIO) | works | Scan works; loaded before Wi-Fi (shared ROM patch) |
 | Speakers (4x CS35L41) | works | Stereo through the protection DSP; no factory calibration |
-| Microphones (AS33970 voice processor) | partial | Since 2026-11-18: firmware loaded by `snd-soc-as33970` (ready 31 s after power-on), stereo capture through PipeWire; not yet heard by a person, voice-processing mode untested (`BOARD.md`, Audio wiring) |
+| Microphones (AS33970 voice processor) | partial | Since 2026-11-18: firmware loaded by `snd-soc-as33970` (ready 31 s after power-on), stereo capture through PipeWire with a fixed +15 dB (voice heard back by the owner); voice-processing mode untested (`BOARD.md`, Audio wiring) |
 | Battery gauge (bq27541) | works | |
 | Charging (MT6360) | works | 2 A with a temperature guard (`yt11-charge-guard`, cut from 45 °C); not tested from a wall charger yet |
 | USB-C (MT6360 TCPC, mtu3) | works | Gadget network to the Mac, role switch |
@@ -83,8 +83,9 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - [x] AS33970 firmware start: the I2C bus was too fast for the chip (50 kHz
       now).
 - [x] Codec driver, capture link on I2S2, PipeWire source.
-- [ ] With the owner: record a voice and listen to it; which microphone is
-      left and right.
+- [x] With the owner: record a voice and listen to it (faint, hence a fixed
+      +15 dB on the PipeWire source).
+- [ ] Which microphone is left and right.
 - [ ] Voice mode (echo cancelling, noise reduction) for calls; the chip's
       power draw in system sleep; a faster firmware load (30 s today).
 

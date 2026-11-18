@@ -464,9 +464,18 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   Measured: firmware ready 31 s after power-on; `arecord` on `hw:0,5`
   gives 24-bit samples on both channels (room noise at -50 dBFS), and
   PipeWire lists the source "Microphones" (ACP profile "Speaker +
-  Microphones"). Not yet checked: a voice heard back by a person, which
-  microphone is on which channel, the Voice mode's echo cancelling, the
-  chip's power draw in system sleep.
+  Microphones"). A stream opened while the firmware loads is silent until
+  it is ready (measured: a recording started 17 s after power-on gets
+  sound from second 31). The UL2 front end cannot be opened while those
+  two switches are off, so `yt11-audio-defaults` sets them when the card
+  appears; otherwise PipeWire's probe drops the microphone profile.
+- Level (2026-11-18): in Raw mode a voice at arm's length records around
+  -36 dBFS rms with peaks near -18 dBFS; the owner found it faint on
+  playback and correct with +15 dB. The image applies that gain on the
+  PipeWire node's master volume (WirePlumber script `yt11/mic-gain.lua`),
+  under the source volume, which still reads 100 %. Not yet checked: which
+  microphone is on which channel, the Voice mode's level and echo
+  cancelling, the chip's power draw in system sleep.
 
 ## Suspend (s2idle, 2026-11-16)
 
