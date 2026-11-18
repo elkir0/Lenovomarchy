@@ -9,8 +9,25 @@ algorithms:
       # CameraSensorHelper for s5k4h7 provides.
       blackLevel: 4096
   - Awb:
-  # No Ccm: colour matrices need per-sensor characterization (see
-  # docs/research/camera/T18-LIBCAMERA-AGC.md).
+  - Ccm:
+      # Colour matrices of the stock camera tuning (MediaTek "dynamic CCM"
+      # for D65, TL84 and A light, units of 1/512), read from the unit's
+      # vendor partition. The stock tuning holds the same matrices for
+      # both sensors. Rows sum to 1: they apply after the white balance
+      # gains, as here.
+      ccms:
+        - ct: 2850
+          ccm: [  1.4941, -0.3691, -0.1250,
+                 -0.1914,  1.2305, -0.0391,
+                 -0.0234, -0.9004,  1.9238 ]
+        - ct: 4000
+          ccm: [  1.8789, -0.7246, -0.1543,
+                 -0.2363,  1.3828, -0.1465,
+                  0.0215, -0.6074,  1.5859 ]
+        - ct: 6500
+          ccm: [  1.6523, -0.5977, -0.0547,
+                 -0.1289,  1.3691, -0.2402,
+                  0.0156, -0.5000,  1.4844 ]
   - Adjust:
   - Agc:
       # Same scheme as ov8856.yaml, see the notes there; the two

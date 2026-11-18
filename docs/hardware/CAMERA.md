@@ -278,8 +278,8 @@ minutes on the eight cores) and installed:
   135 of 255, gain 11.7x, 2416 lines). Target 1.6, the value kept, gives
   about 100 of 255 at 1559 lines and the same gain, with the windows
   less blown out. The rear camera, pointed at a white page, gives 136.
-- Colours stay dull and slightly green: there is no colour matrix, and
-  making one needs a colour chart under known light.
+- Colours stayed dull and slightly green without a colour matrix; see
+  "Colours" below.
 - The 4.3 packages on the tablet were built with target 2.0; the
   installed tuning files were then replaced by the 1.6 ones by hand
   (4.4 is built with 1.6).
@@ -339,3 +339,30 @@ minutes on the eight cores) and installed:
   `v4l2-ctl -d /dev/v4l-subdev2 --get-ctrl focus_absolute`. omacam sets
   `LIBCAMERA_LOG_FILE=syslog`: libcamera's log is in the journal.
 
+## Colours (2026-11-18)
+
+- Colour matrices: the stock camera tuning
+  (`/vendor/lib64/ov8856_mipi_raw_tuning.so`, `s5k4h7_mipi_raw_tuning.so`
+  and the `txd` / `yxsub` variants) holds four MediaTek "dynamic CCM"
+  entries as packed 13-bit fields in units of 1/512, followed by the
+  white balance gains of their light sources (R, G, B over 512: 1342/647,
+  978/915, 1114/1021, 681/1207, i.e. D65, TL84, CWF, A). The four
+  libraries hold the same matrices and gains: the stock tuning does not
+  distinguish the two sensors here. `ov8856.yaml` and `s5k4h7.yaml` carry
+  the D65, TL84 and A matrices at 6500, 4000 and 2850 K (the CWF entry's
+  first row sums to 485 instead of 512 and is left out).
+- White balance: the soft IPA's grey-world sums counted clipped pixels,
+  which read the same in every channel and pull both gains towards 1. On
+  the front camera facing a room with a blown-out window that gave gains
+  of 1.47 / 1.36 and cyan whites (a white fan blade at 65, 86, 77), which
+  the matrix then amplified. `libcamera-0.7.2-yt11-awb.patch` (package
+  0.7.2-4.6) adds sums that leave out pixels with a channel at 240 of 255
+  or more and uses them unless nearly everything is clipped: gains 1.72 /
+  1.60 in the same scene, picture mean 86, 86, 85, white wall white, wood
+  brown, skin natural.
+- Cost: none measurable. The omacam viewfinder uses about 1.3 cores with
+  or without the matrix (it is applied in the GPU debayer shader).
+- Left: lens shading. The corners are darker and greener than the centre
+  on both cameras; the soft ISP has no shading correction. Grey-world
+  white balance still follows a scene's dominant colour. Nothing was
+  measured against a colour chart.

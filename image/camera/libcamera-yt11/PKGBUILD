@@ -20,6 +20,9 @@
 #     actuator from the simple pipeline (LensPosition control), and
 #     libcamera-0.7.2-yt11-af.patch adds a contrast autofocus algorithm
 #     to the soft IPA (AfMode, AfTrigger, AfState).
+#   - libcamera-0.7.2-yt11-awb.patch keeps clipped pixels out of the white
+#     balance sums (a blown window pulled the gains towards 1), and the
+#     tuning files carry the stock tuning's colour matrices.
 #   - Only the simple pipeline and the soft IPA are built, and the heavy
 #     extras the tablet does not need (docs, GStreamer plugin, Python
 #     bindings, lc-compliance) are disabled so `makepkg -s` on the tablet
@@ -41,7 +44,7 @@ pkgname=(
   libcamera-tools
 )
 pkgver=0.7.2
-pkgrel=4.5
+pkgrel=4.6
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
 arch=(aarch64)
 url="https://libcamera.org/"
@@ -82,6 +85,7 @@ source=(
   "$pkgbase-$pkgver-yt11-agc.patch"
   "$pkgbase-$pkgver-yt11-lens.patch"
   "$pkgbase-$pkgver-yt11-af.patch"
+  "$pkgbase-$pkgver-yt11-awb.patch"
   "ov8856.yaml"
   "s5k4h7.yaml"
 )
@@ -91,16 +95,18 @@ sha512sums=('SKIP'
             'c22552d43f041a8d98d933ca8d8c6fb89f2371cb33020b497b10a7d239317b3c50780a8cd6b2339c6df80b3dd78a792c46450e1f4ec30c23f1ceefce1b5cdf2b'
             '872b61481feadf07c3022989c051320851fabcecb462715c3041ef097b777dbc74616518077e2039fae4dc3b329c58e40c9275f956c981f3b9a65036a21a0cf3'
             'b58b40f33152879a5d8ad8c0b0db02c0b6a780c1b282738b742e0dba5a72df77aca750c8eda6632c5a1ae978ad8f850914dd1bf6769af00f6fedddf3f0062fc3'
-            '625360c54f773b6d799ffa0ae05ad97c03e557fa12a46288015ecfb28afe50afa15c0fc83de993185ad983168413d3b8e0b1be9c22f50c8bb162322591414609'
-            'def4713b28cda65e8f1aa25289407ee70152dab1e73384a640a9c95a6438c2ffd62dae621a6cf741127cd1e9866370edfee4e6a784301a9a80a84113ec57e198')
+            '6371a083e1c7fd3f7bd72e924ba578965aafa50f5b497c42e7eaf85e3f6d793b42a8f1b1aa229a604993646284c8686773c2bfb636fa1b28296aa3f39286b516'
+            '437f414e7718fa7c31fba1b529c37bf979cd92b792d6f84ce3dfe7591771929c4163699405cf8ac5a228483e078c13d140b195e91500a9f5c527030f5814d50f'
+            'c509886d2de53fb665018da6c8c9979da59e993310fa6c94f3bdcd9c584962f922b808d94a9d6ffb6b13fb280bb34def00e9e016443a4f09324a7cc8a6d2046b')
 b2sums=('SKIP'
         '73f3399218201a8ce0358b8bc58ffeff57a5010a3cb6a48aa21f1509b2642a621cbacabfb34939b048d97760cd26fcd64b390ad0d525e16c4f020aa63ae4c62f'
         '9c57cd8ba76a5b761bfa0e1652ba2ccbac538b225affaa7ba323d81b23e5357d4b47a7e57027c671c470d38264363744ceeaf373844c9140ee10b853dc96f3fc'
         '2b586acd15b9fb7c48e850351fd0ed7cd7a8c693dbf3bc1f7818e3bd5954485953eafbf509e62c52e05e4c7359ce087b5f48a42d1fcb1db43acc8973d6de1a7b'
         '32e9412455fb7b28749f94e8348981efd7f6a734506474366ac8734d3ca6225fb8c7e7230508ae6d665624165ca708c00d3181d2663c83a5b23241af6a138558'
         'c01bd9fccd427919a1836d7ef0597858f7b35ca030d76737fcd1a2e52590d22e43df8c426e70774a4d9788bfa4ee8a7967df456a3236d69d644398168a9d6600'
-        'fa8e162c4812afe6671853b31671251d96c1e60a97fe6b3dae4bc994d2bfa1faeaa9c6395d2bda4cdb5ee34ef199f1d28dedc9c06fb8d66d97ee95b16251071c'
-        '864a07696f307dd53708ab9e02a5908b637d7265d5dbd94c813ca4b4eb653037e355cbeddb927a8ac328cd5a57b4a26c7f47ad1e110cfb1f0c879a516bc5a1a4')
+        '3bd6450d584fd99f1e823fe2b51871c30a97348ffbb45b612b988e9a216d0fdb7b65e795b61448018f6e15d5db218e2c5d025dc3266ce733b1d172af7a4ed621'
+        '78f8849295bd11ca2bf3676056ab6709f815591621cc68c0380a0faf14b30a377f6a730a7fc84fa40b4fe43e3bcf06ed75e06ceb4904b9e91e621c72e5a7e67c'
+        'badeec93c1438c66574c8c93fb2923b66b8cc04f6c3dd15164be0de2c380e4698657cf0892393ff9ad2efb9e54f9fd5c2f55155349b631331f273dbba8fb126f')
 
 _pick() {
   local p="$1" f d; shift
@@ -119,6 +125,7 @@ prepare() {
   patch -Np1 < ../$pkgbase-$pkgver-yt11-agc.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-lens.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-af.patch
+  patch -Np1 < ../$pkgbase-$pkgver-yt11-awb.patch
 
   # add version, so that utils/gen-version.sh may rely on it
   printf "%s\n" "$pkgver" > .tarball-version

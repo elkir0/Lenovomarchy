@@ -1,0 +1,133 @@
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index d7dc715..3f6d4f9 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -31,6 +31,19 @@ struct SwIspStats {
+ 	 * \brief Sums of colour channels of all the sampled pixels
+ 	 */
+ 	RGB<uint64_t> sum_;
++	/**
++	 * \brief Sums of colour channels of the sampled pixels that are not
++	 *        clipped
++	 *
++	 * A clipped pixel reads the same in every channel whatever the light,
++	 * so it pulls the white balance gains towards 1. The white balance
++	 * algorithm uses these sums rather than \a sum_.
++	 */
++	RGB<uint64_t> awbSum_;
++	/**
++	 * \brief Number of sampled pixels counted in \a awbSum_
++	 */
++	uint32_t awbPixels;
+ 	/**
+ 	 * \brief Number of bins in the yHistogram
+ 	 */
+diff --git a/src/ipa/simple/algorithms/awb.cpp b/src/ipa/simple/algorithms/awb.cpp
+index 05155c8..b2bd8ee 100644
+--- a/src/ipa/simple/algorithms/awb.cpp
++++ b/src/ipa/simple/algorithms/awb.cpp
+@@ -65,13 +65,21 @@ void Awb::process(IPAContext &context,
+ 	 */
+ 	const uint64_t nPixels = std::accumulate(
+ 		histogram.begin(), histogram.end(), uint64_t(0));
+-	const uint64_t offset = blackLevel * nPixels;
+ 	const uint64_t minValid = 1;
++	/*
++	 * Clipped pixels read the same in every channel and pull the gains
++	 * towards 1: use the sums that leave them out, unless nearly the whole
++	 * picture is clipped.
++	 */
++	const bool unclipped = stats->awbPixels >= nPixels / 16;
++	const uint64_t offset = blackLevel *
++				(unclipped ? stats->awbPixels : nPixels);
+ 	/*
+ 	 * Make sure the sums are at least minValid, while preventing unsigned
+ 	 * integer underflow.
+ 	 */
+-	const RGB<uint64_t> sum = stats->sum_.max(offset + minValid) - offset;
++	const RGB<uint64_t> sum =
++		(unclipped ? stats->awbSum_ : stats->sum_).max(offset + minValid) - offset;
+ 
+ 	/*
+ 	 * Calculate red and blue gains for AWB.
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index d56b584..b920120 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -170,6 +170,8 @@ SwStatsCpu::SwStatsCpu(const CameraManager &cm)
+ static constexpr unsigned int kRedYMul = 77; /* 0.299 * 256 */
+ static constexpr unsigned int kGreenYMul = 150; /* 0.587 * 256 */
+ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
++/* Pixels with a channel at or above this (8-bit scale) are left out of AWB */
++static constexpr unsigned int kAwbClipLevel = 240;
+ 
+ #define SWSTATS_START_LINE_STATS(pixel_t) \
+ 	pixel_t r, g, g2, b;              \
+@@ -180,12 +182,24 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+ 	uint64_t sumB = 0;                \
+-	uint64_t sharpness = 0;
++	uint64_t sharpness = 0;           \
++	uint64_t awbR = 0;                \
++	uint64_t awbG = 0;                \
++	uint64_t awbB = 0;                \
++	uint32_t awbPixels = 0;
+ 
+ #define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+ 	sumR += r;                         \
+ 	sumG += g;                         \
+ 	sumB += b;                         \
++	if (r < kAwbClipLevel * (div) &&   \
++	    g < kAwbClipLevel * (div) &&   \
++	    b < kAwbClipLevel * (div)) {   \
++		awbR += r;                 \
++		awbG += g;                 \
++		awbB += b;                 \
++		awbPixels++;               \
++	}                                  \
+ 	if (!firstG)                       \
+ 		sharpness += g > prevG ? g - prevG : prevG - g; \
+ 	firstG = false;                    \
+@@ -200,6 +214,10 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ 	stats.sum_.r() += sumR;     \
+ 	stats.sum_.g() += sumG;     \
+ 	stats.sum_.b() += sumB;     \
++	stats.awbSum_.r() += awbR;  \
++	stats.awbSum_.g() += awbG;  \
++	stats.awbSum_.b() += awbB;  \
++	stats.awbPixels += awbPixels; \
+ 	stats.sharpness += sharpness;
+ 
+ void SwStatsCpu::statsBGGR8Line0(const uint8_t *src[], SwIspStats &stats)
+@@ -399,6 +417,8 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 
+ 	for (auto &s : stats_) {
+ 		s.sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		s.awbSum_ = RGB<uint64_t>({ 0, 0, 0 });
++		s.awbPixels = 0;
+ 		s.yHistogram.fill(0);
+ 		s.sharpness = 0;
+ 	}
+@@ -417,16 +437,21 @@ void SwStatsCpu::finishFrame(uint32_t frame, uint32_t bufferId)
+ 
+ 	if (valid) {
+ 		sharedStats_->sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		sharedStats_->awbSum_ = RGB<uint64_t>({ 0, 0, 0 });
++		sharedStats_->awbPixels = 0;
+ 		sharedStats_->yHistogram.fill(0);
+ 		sharedStats_->sharpness = 0;
+ 		for (const auto &s : stats_) {
+ 			sharedStats_->sum_ += s.sum_;
++			sharedStats_->awbSum_ += s.awbSum_;
++			sharedStats_->awbPixels += s.awbPixels;
+ 			for (unsigned int j = 0; j < SwIspStats::kYHistogramSize; j++)
+ 				sharedStats_->yHistogram[j] += s.yHistogram[j];
+ 			sharedStats_->sharpness += s.sharpness;
+ 		}
+ 
+ 		sharedStats_->sum_ >>= sumShift_;
++		sharedStats_->awbSum_ >>= sumShift_;
+ 	}
+ 
+ 	sharedStats_->valid = valid;

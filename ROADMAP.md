@@ -31,8 +31,8 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Accelerometer + gyroscope (BMI220) | works | Auto-rotation in all four positions |
 | Light sensor (LTR-578) | partial | Reads lux, drives auto-brightness (`yt11-autobrightness`); only tested in a dim room |
 | Proximity | missing | LTR-578 proximity part and the device at i2c1 0x29 not supported |
-| Rear camera (OV8856) | partial | libcamera + omacam, autofocus; no colour calibration, AF ~18 s to settle at app start |
-| Front camera (S5K4H7) | partial | libcamera + omacam; no colour calibration |
+| Rear camera (OV8856) | partial | libcamera + omacam, autofocus, stock colour matrices; no lens shading correction, AF ~18 s to settle at app start |
+| Front camera (S5K4H7) | partial | libcamera + omacam, stock colour matrices; no lens shading correction |
 | Thermal (LVTS) | works | Throttling at 85 °C |
 | Suspend (s2idle) | partial | Works, Wi-Fi back on resume; ~135 mA asleep (about 48 h) |
 | Suspend (deep), CPU idle states | missing | Need MediaTek's SPM/MCDI firmware handling |
@@ -69,8 +69,9 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 
 ### R2: camera quality
 
-- Colour correction matrices for both sensors (soft ISP CCM in the tuning
-  files).
+- [x] Colour matrices for both sensors (from the stock tuning) and a white
+      balance that ignores clipped pixels.
+- [ ] Lens shading correction in the soft ISP (dark, green corners).
 - Faster autofocus at app start (first sweep), then photo/video checks.
 
 ### R3: microphones
