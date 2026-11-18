@@ -247,6 +247,19 @@ chip is still to be read from Linux (register 0x01). The SGM37604A
 (i2c7 0x36) and OCP2138 (i2c7 0x3e) drivers bind on the stock kernel but are
 not used by this panel's driver.
 
+Read on the unit (2026-11-18): register 0x01 is 0x12, so the chip is the
+KTZ8864A (`& 0x03` = 2), for which the vendor driver writes 0x15 = 0xa0
+(full-scale current 21.2 mA) and 0x08 = 0x1f (four LED strings). The
+chip's PWM input (the panel's DCS brightness) multiplies its I2C level, and
+the product then goes through the mapping of register 0x02 bit 3. With the
+vendor's exponential mapping, a DSI brightness of 28 % (PWM readback
+0x12/0x13 = 569 of 2047) is about 1 % of the LED current: the screen looked
+dim at every setting. The board DT now uses the linear mapping, four
+strings and `kinetic,full-scale-reg = <0xa0>` (a `yt11` addition to
+`lm36274_bl`), and keeps the I2C level at 2047: a udev rule sets it and
+`systemd-backlight` is masked for `lm36274-backlight`, which it restored
+to an older 800. The brightness users move is the DSI one.
+
 ## GPIO table of the vendor project (`tb8185p3_64.dws`)
 
 The DWS file of the GPL tree (`drivers/misc/mediatek/dws/mt6785/tb8185p3_64.dws`,

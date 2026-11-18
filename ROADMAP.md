@@ -14,7 +14,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 |---|---|---|
 | Boot (LK, `boot_a`, root on `userdata`) | works | Keyless fastboot through the preloader; `fastboot boot` unusable (`docs/hardware/INVENTORY.md`) |
 | Display (Himax HX83102P, DSI) | works | `docs/hardware/DISPLAY.md`; 60.07 Hz since 2026-11-18 (at 59.4 Hz a band repeated at the panel's first rows) |
-| Backlight (LM36274-class) | works | Off before suspend through `bl_power` |
+| Backlight (KTZ8864A, LM36274-class) | works | Linear mapping and four LED strings since 2026-11-18 (it was about 1 % of the LED current at 28 %); off before suspend through `bl_power` |
 | Touch (Himax, zero-flash) | works | `docs/design/TOUCH.md`; firmware extracted from the unit |
 | Pen (Precision Pen 2, through the touch chip) | untested | No pen at hand so far |
 | GPU (Mali-G76, Panfrost) | works | |
