@@ -56,7 +56,8 @@ diskutil image attach --mountPoint src .src.sparsebundle
 
 - [Dinolek/mt6785-mainline](https://github.com/Dinolek/mt6785-mainline),
   branch `7.1` (Redmi Note 8 Pro "begonia"), cloned in `src/mt6785-mainline`;
-  this project's work is on its local branch `yt11`.
+  this project's work is on the branch `yt11`, published in
+  [elkir0/mt6785-mainline](https://github.com/elkir0/mt6785-mainline/tree/yt11).
 - Donor patches from
   [F-to-pay/PostmarketOS-begonia](https://github.com/F-to-pay/PostmarketOS-begonia)
   (audio AFE, MT6360 charger), cloned in `src/begonia-ftp`.
