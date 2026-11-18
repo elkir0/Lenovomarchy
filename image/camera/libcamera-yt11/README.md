@@ -85,6 +85,35 @@ takes `coarseStep`, `fineStep`, `settleFrames`, `retriggerRatio` and
 these controls. Design and limits:
 `docs/research/camera/T19-LIBCAMERA-LENS.md`.
 
+### Lens shading (`libcamera-0.7.2-yt11-lsc.patch`)
+
+Both cameras show lens shading: the corners are darker and greener than
+the centre. The patch adds an `Lsc` algorithm to the soft IPA. Each colour
+channel of the raw values is multiplied, after black level subtraction
+and before the white balance gains, the colour matrix and gamma, by a
+radial gain:
+
+```yaml
+  - Lsc:
+      centre: [ 0.5, 0.5 ]          # optical centre as a fraction of width, height (optional, default 0.5, 0.5)
+      red:   [ k1, k2, k3 ]         # gain(r) = 1 + k1*r^2 + k2*r^4 + k3*r^6
+      green: [ k1, k2, k3 ]
+      blue:  [ k1, k2, k3 ]
+```
+
+`r` is the distance from the centre divided by half the frame diagonal,
+with square pixels (r = 1 in a corner when the centre is 0.5, 0.5); the
+centre fraction counts from the first column and row of the buffer. Each
+gain is clamped to [1, 4]. A missing colour entry leaves that channel
+uncorrected; without an `Lsc` entry the feature is off and the shaders do
+not contain it. Only the GPU debayer applies the correction (the CPU
+debayer logs a warning and ignores it), and the statistics, hence the
+exposure and white balance loops, still see the uncorrected image. The
+frame is the full debayered image at the sensor mode's aspect ratio:
+when the requested output has another aspect ratio, the GPU debayer
+crops it at the right or bottom and the correction stays on the optics,
+so fit the coefficients on a capture with the native aspect ratio.
+
 ## Building on the tablet
 
 Copy this directory to the tablet (it has no other repo dependencies)
@@ -94,9 +123,9 @@ and run, as a normal user with `base-devel` and `sudo`:
 pacman -S --needed base-devel
 cd libcamera-yt11
 makepkg -s              # ~30-60 min on the MT6785
-sudo pacman -U libcamera-0.7.2-4.6-aarch64.pkg.tar.xz \
-                libcamera-ipa-0.7.2-4.6-aarch64.pkg.tar.xz \
-                libcamera-tools-0.7.2-4.6-aarch64.pkg.tar.xz
+sudo pacman -U libcamera-0.7.2-4.7-aarch64.pkg.tar.xz \
+                libcamera-ipa-0.7.2-4.7-aarch64.pkg.tar.xz \
+                libcamera-tools-0.7.2-4.7-aarch64.pkg.tar.xz
 ```
 
 Notes:

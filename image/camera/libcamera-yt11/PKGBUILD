@@ -23,6 +23,8 @@
 #   - libcamera-0.7.2-yt11-awb.patch keeps clipped pixels out of the white
 #     balance sums (a blown window pulled the gains towards 1), and the
 #     tuning files carry the stock tuning's colour matrices.
+#   - libcamera-0.7.2-yt11-lsc.patch adds a radial lens shading correction
+#     (Lsc in the tuning file) to the soft IPA, applied by the GPU debayer.
 #   - Only the simple pipeline and the soft IPA are built, and the heavy
 #     extras the tablet does not need (docs, GStreamer plugin, Python
 #     bindings, lc-compliance) are disabled so `makepkg -s` on the tablet
@@ -44,7 +46,7 @@ pkgname=(
   libcamera-tools
 )
 pkgver=0.7.2
-pkgrel=4.6
+pkgrel=4.7
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS (YT-J706F simple pipeline + soft ISP)"
 arch=(aarch64)
 url="https://libcamera.org/"
@@ -86,6 +88,7 @@ source=(
   "$pkgbase-$pkgver-yt11-lens.patch"
   "$pkgbase-$pkgver-yt11-af.patch"
   "$pkgbase-$pkgver-yt11-awb.patch"
+  "$pkgbase-$pkgver-yt11-lsc.patch"
   "ov8856.yaml"
   "s5k4h7.yaml"
 )
@@ -96,6 +99,7 @@ sha512sums=('SKIP'
             '872b61481feadf07c3022989c051320851fabcecb462715c3041ef097b777dbc74616518077e2039fae4dc3b329c58e40c9275f956c981f3b9a65036a21a0cf3'
             'b58b40f33152879a5d8ad8c0b0db02c0b6a780c1b282738b742e0dba5a72df77aca750c8eda6632c5a1ae978ad8f850914dd1bf6769af00f6fedddf3f0062fc3'
             '6371a083e1c7fd3f7bd72e924ba578965aafa50f5b497c42e7eaf85e3f6d793b42a8f1b1aa229a604993646284c8686773c2bfb636fa1b28296aa3f39286b516'
+            'a3c3fde4694137965057a5e1c58089386b68cb5be6a5333f82289dee030cac1a4449e1b1db52e0e02f6847c3b1f7ed6db3eece5839e372d0e18ce8cff0401473'
             '437f414e7718fa7c31fba1b529c37bf979cd92b792d6f84ce3dfe7591771929c4163699405cf8ac5a228483e078c13d140b195e91500a9f5c527030f5814d50f'
             'c509886d2de53fb665018da6c8c9979da59e993310fa6c94f3bdcd9c584962f922b808d94a9d6ffb6b13fb280bb34def00e9e016443a4f09324a7cc8a6d2046b')
 b2sums=('SKIP'
@@ -105,6 +109,7 @@ b2sums=('SKIP'
         '32e9412455fb7b28749f94e8348981efd7f6a734506474366ac8734d3ca6225fb8c7e7230508ae6d665624165ca708c00d3181d2663c83a5b23241af6a138558'
         'c01bd9fccd427919a1836d7ef0597858f7b35ca030d76737fcd1a2e52590d22e43df8c426e70774a4d9788bfa4ee8a7967df456a3236d69d644398168a9d6600'
         '3bd6450d584fd99f1e823fe2b51871c30a97348ffbb45b612b988e9a216d0fdb7b65e795b61448018f6e15d5db218e2c5d025dc3266ce733b1d172af7a4ed621'
+        'f1e9d93835bdc838bf63ed889012337fafbf2c15a83c260326905a16592fd1d53c13ec3524515c7d32b7770850979779939429b87833e262007d4e17c7991803'
         '78f8849295bd11ca2bf3676056ab6709f815591621cc68c0380a0faf14b30a377f6a730a7fc84fa40b4fe43e3bcf06ed75e06ceb4904b9e91e621c72e5a7e67c'
         'badeec93c1438c66574c8c93fb2923b66b8cc04f6c3dd15164be0de2c380e4698657cf0892393ff9ad2efb9e54f9fd5c2f55155349b631331f273dbba8fb126f')
 
@@ -126,6 +131,7 @@ prepare() {
   patch -Np1 < ../$pkgbase-$pkgver-yt11-lens.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-af.patch
   patch -Np1 < ../$pkgbase-$pkgver-yt11-awb.patch
+  patch -Np1 < ../$pkgbase-$pkgver-yt11-lsc.patch
 
   # add version, so that utils/gen-version.sh may rely on it
   printf "%s\n" "$pkgver" > .tarball-version

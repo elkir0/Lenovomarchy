@@ -362,7 +362,14 @@ minutes on the eight cores) and installed:
   brown, skin natural.
 - Cost: none measurable. The omacam viewfinder uses about 1.3 cores with
   or without the matrix (it is applied in the GPU debayer shader).
-- Left: lens shading. The corners are darker and greener than the centre
+- Lens shading: libcamera 0.7.2-4.7 has a radial per-channel correction in
+  the GPU debayer (`Lsc` in the tuning file, see the package README) and
+  `tools/camera/lsc-fit.py` fits its coefficients from a flat-field raw
+  frame. No coefficients yet: two hand-held captures of a sheet of paper
+  (front camera, 2026-11-18) were rejected, one not covering the lens, one
+  with print showing and a 7 % fit residual. Without an `Lsc` block the
+  picture is unchanged (checked on the unit).
+- Left: lens shading coefficients. The corners are darker and greener than the centre
   on both cameras; the soft ISP has no shading correction. Grey-world
   white balance still follows a scene's dominant colour. Nothing was
   measured against a colour chart.

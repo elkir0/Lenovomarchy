@@ -71,7 +71,11 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 
 - [x] Colour matrices for both sensors (from the stock tuning) and a white
       balance that ignores clipped pixels.
-- [ ] Lens shading correction in the soft ISP (dark, green corners).
+- [x] Lens shading correction in the soft ISP (libcamera 0.7.2-4.7, `Lsc`
+      tuning block) and a fit tool (`tools/camera/lsc-fit.py`).
+- [ ] Lens shading coefficients: needs a flat-field frame per camera (blank
+      white diffuser on the lens, even light). Two tries by hand on
+      2026-11-18 were not flat enough; until then the corners stay dark.
 - Faster autofocus at app start (first sweep), then photo/video checks.
 
 ### R3: microphones
