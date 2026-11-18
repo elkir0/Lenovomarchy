@@ -28,6 +28,16 @@ kernel tree `yt11` commits `e5d7b2535` and `43b97efa8`.
    (mode clock 174 MHz, HFP widened to 128 so the mode stays at 60 Hz;
    measured line 7.91 us, PLL 1044 MHz) and a continuous clock.
 
+3. **A band repeated at the panel's first rows (2026-11-18).** With HFP
+   128 the mode was 60.0 Hz on paper, but the DSI host adds about 0.07 us
+   of LP transition per line: 7.91 us measured, 59.4 Hz. The owner saw,
+   in landscape, the leftmost ~3 mm of the screen (the panel's first rows,
+   over its whole width) repeat the picture found ~4 mm further in; a
+   screenshot was clean. A test mode with HFP 114 (7.83 us per line,
+   60.07 Hz, no underrun) removed the band. Fix: `drm/panel:
+   himax-hx83102: J706F: Shorten HFP to reach 60 Hz`. The panel wants at
+   least 60 Hz: measure with `yt11-dsirate` after any timing change.
+
 How it was found: `tools/display/dsiwatch.py` logs the ratio with
 dmesg-comparable timestamps while mediatek-drm is loaded as a module
 (`kernel/configs/dev/drm-module.config`) on top of LK's running display

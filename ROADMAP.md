@@ -13,7 +13,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Block | State | Notes |
 |---|---|---|
 | Boot (LK, `boot_a`, root on `userdata`) | works | Keyless fastboot through the preloader; `fastboot boot` unusable (`docs/hardware/INVENTORY.md`) |
-| Display (Himax HX83102P, DSI) | partial | `docs/hardware/DISPLAY.md`; seen by the owner on 2026-11-18: in landscape the leftmost ~3 mm repeat the picture found ~4 mm further right, over the whole height |
+| Display (Himax HX83102P, DSI) | works | `docs/hardware/DISPLAY.md`; 60.07 Hz since 2026-11-18 (at 59.4 Hz a band repeated at the panel's first rows) |
 | Backlight (LM36274-class) | works | Off before suspend through `bl_power` |
 | Touch (Himax, zero-flash) | works | `docs/design/TOUCH.md`; firmware extracted from the unit |
 | Pen (Precision Pen 2, through the touch chip) | untested | No pen at hand so far |
