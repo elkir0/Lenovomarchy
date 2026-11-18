@@ -419,30 +419,54 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   (firmware 4.15.13.0: an 8 KiB second-stage loader at 0x100, then 158
   blocks of 4 KiB at 0x10000) at every boot. `tools/audio/tahiti_load.py`
   reimplements that protocol (16-bit big-endian sub-addresses, 32-bit
-  little-endian words). Measured on the unit (2026-11-16): the ROM accepts
-  the second-stage loader (`S`, `S`, then `O` after `D`), but that loader
-  (`iflash_boot2`) never posts its ready word `0x80` and does not answer
-  messages, with or without I2S1 clocks running and with vbif28, va09 and
-  vemc forced on. Something it needs at start-up (a clock, a supply or a
-  pin the stock kernel sets) is still missing. The microphones do not work
-  yet.
-- Second-stage findings (2026-11-16, from the image and the unit): the
-  8 KiB loader is a Cortex-M image in two segments, each behind a 0x18-byte
-  header (load address, length): 0xff0 bytes at 0x30019000 (vector table,
-  reset handler) and 0x710 bytes at 0x30019ff0. Its init points the I2C
-  slave window (registers at 0x42001400) at a RAM mailbox at 0x3001a69c and
-  writes 0x80 there; its loop waits for bit 7 of word 0 to clear, checks
-  the sequence byte and the hash in word 1, dispatches commands 8 (write a
-  4 KiB block) to 16 (14 sets the state that leaves the loop and jumps to
-  the firmware's vector table), others answer trivially, then sets bit 7.
-- On mainline the host sees that mailbox 4 bytes higher than the vendor
-  loader assumes: with every message moved to sub-address +4, ping and
-  status messages and all 158 block writes are acknowledged (4.7 s), but
-  the device only ever updates the done bit (reply words 1 and 2 keep what
-  the host wrote) and command 14 does not leave the loop: the firmware never
-  starts. The offset and the frozen reply words point at a different window
-  set-up than the stock kernel's, or at the ROM answering instead of the
-  loader; untangling it needs more disassembly of the loader's I2C path.
+  little-endian words); `tools/mic-firmware.sh` extracts the image from the
+  stock `super` and installs it as `/usr/lib/firmware/tahiti/partition_boot2flash.img`.
+- The second-stage loader (`iflash_boot2`, a Cortex-M image: 0xff0 bytes at
+  0x30019000, the rest at 0x30019ff0) points the I2C slave window
+  (registers at 0x42001400) at a RAM mailbox at 0x3001a69c, posts `0x80`
+  there and serves messages: bit 7 of word 0 is the done flag, word 1 a
+  Fletcher checksum, commands 8 (write a 4 KiB block) to 16, 14 jumps to the
+  firmware.
+- **I2C speed (measured 2026-11-18)**: the chip misses the first bit of a
+  32-bit word when bits come too fast. At 400 kHz, once the second-stage
+  loader runs, bit 7 of each word's first byte arrives one word late, in
+  reads and in writes (written `80808080 c0c0c0c0 01010101 aa55aa55`, read
+  back `80808080 c0c0c0c0 81010101 2a55aa55`); at 1 MHz bits 7 and 6 do,
+  and even the ROM's 'C' reads as `0x03`. This is what made the mailbox
+  look "4 bytes higher" on 2026-11-16 (its done flag is such a bit) and
+  every message fail. At 100 kHz the loader is clean (it takes the 158
+  blocks and starts the firmware, which answers `0x8badd00d` at
+  sub-address 4), but the running firmware still fails about four commands
+  in ten (a rate of 48000, `0x0000bb80`, arrives as `0xbb00`: error -1061).
+  Bit-banging the bus through the GPIO registers gives a sharp limit with
+  the firmware running: every transfer wrong at 9.5 us per bit, none at
+  12.4 us, whichever of the high or low time is stretched, and the chip
+  never holds SCL low. The pins' pull-ups change nothing. i2c9 therefore
+  runs at **50 kHz**: 60 commands out of 60 pass, and the firmware load
+  takes 30 s. The stock loader tool asks the vendor I2C driver for 1 MHz
+  during the load and 400 kHz after it; what makes the chip that much
+  faster under the stock kernel (a reference clock it gets there, or the
+  vendor controller's timing) is not known.
+- Firmware commands (the vendor driver's protocol: word 0 = count, command
+  and reply bit 31, word 1 = module id, data from word 2; module `MCU `):
+  version reads 4.15.13.0, the mode after start is `ZFV0` (voice
+  processing); `ZFV3` is the plain 48 kHz capture. After the record-start
+  event the chip drives microphone data on the I2S2 input pin (GPIO33),
+  with or without clocks at that moment. It must be told the real frame
+  size: 64 bits (two 32-bit slots, the frame I2S1 clocks for the
+  amplifiers); told 48, it accepts everything and stays silent.
+- Mainline (kernel `yt11`): codec driver `snd-soc-as33970` (firmware load
+  at probe in a work item, "Capture Mode" control: Voice / Raw / Dump, Raw
+  by default, record start and stop from a DAPM event) and a "Voice Mic"
+  back end on I2S2 in the machine driver, clocked by I2S1
+  (`mediatek,capture-codec`, `mediatek,capture-i2s-clock`), captured on
+  UL2 (PCM device 5) with `UL2_CH1 I2S2_CH1` and `UL2_CH2 I2S2_CH2` on.
+  Measured: firmware ready 31 s after power-on; `arecord` on `hw:0,5`
+  gives 24-bit samples on both channels (room noise at -50 dBFS), and
+  PipeWire lists the source "Microphones" (ACP profile "Speaker +
+  Microphones"). Not yet checked: a voice heard back by a person, which
+  microphone is on which channel, the Voice mode's echo cancelling, the
+  chip's power draw in system sleep.
 
 ## Suspend (s2idle, 2026-11-16)
 

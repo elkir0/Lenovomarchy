@@ -18,10 +18,11 @@ Utilities for targeting, flashing, backing up, and test-booting the Lenovo Yoga 
 - [`mtk-preloader/test_preloader_fastboot.py`](mtk-preloader/test_preloader_fastboot.py): pty-based unit tests for `preloader_fastboot.py`.
 - [`lp-extract.py`](lp-extract.py): on the Mac, minimal reader for Android logical-partition (`super`) metadata: `lp-extract.py <super.img>` lists the partitions with their size and extent count, `lp-extract.py <super.img> <name> <out.img>` copies one partition out (linear extents only). Used by `amp-firmware.sh` and `touch-firmware.sh`.
 - [`amp-firmware.sh`](amp-firmware.sh): extract the CS35L41 speaker-protection DSP firmware and per-amp tunings from the unit's stock `super` image into `private/`, and with `--install` copy them to the tablet under the names mainline loads (`YT11_HOST` overrides the address).
+- [`mic-firmware.sh`](mic-firmware.sh): extract the AS33970 voice processor's firmware image from the unit's stock `super` image into `private/`, and with `--install` copy it to the tablet as `/usr/lib/firmware/tahiti/partition_boot2flash.img`, the file the `snd-soc-as33970` driver loads at every start (no microphones without it).
 - [`touch-firmware.sh`](touch-firmware.sh): extract the Himax touch firmware from the stock `super` image, optionally install it.
 - [`wifi-cycle.py`](wifi-cycle.py): on the tablet as root (`/dev/mem`), power-cycle the MT7663 Wi-Fi chip: unbind the MMC1 host (`11240000.mmc`), hold the chip's enable line GPIO99 low for `low_ms` (default 200), raise it, wait `high_ms` (default 150), clear the kernel log and rebind the host, then print GPIO149 (the chip's interrupt line), GPIO10 (its role is not stated in the source), the last `mmc1`/`sdio` kernel messages and any SDIO device: `wifi-cycle.py [low_ms] [high_ms]`.
 - [`audio/audprobe.py`](audio/audprobe.py): on the tablet, play digital silence on the muted speaker path and dump the AFE I2S registers, pad levels and CS35L41 power/PLL status.
-- [`audio/tahiti_load.py`](audio/tahiti_load.py): on the tablet, load the AS33970 voice processor's firmware over i2c-dev (stage 1 works; see `docs/hardware/BOARD.md`); offline tests in [`audio/test_tahiti_load.py`](audio/test_tahiti_load.py).
+- [`audio/tahiti_load.py`](audio/tahiti_load.py): on the tablet, load the AS33970 voice processor's firmware over i2c-dev (`--bus` is the i2c9 adapter's number). The kernel driver does this itself now; the tool stays for experiments. Offline tests in [`audio/test_tahiti_load.py`](audio/test_tahiti_load.py).
 
 ### Camera bring-up (`tools/camera/`)
 

@@ -5,9 +5,10 @@ This protocol implementation was derived from observing the vendor's loader
 behaviour. No vendor code is included, and the firmware image itself is not
 part of the repository.
 
-Status (2026-11-16): stage 1 works on the YT-J706F (the ROM accepts the
-second-stage loader), but the second-stage loader does not start on mainline
-yet, so the wait for 0x80 times out. See docs/hardware/BOARD.md.
+Status (2026-11-18): the whole load works on the YT-J706F once the bus is
+slow enough (100 kHz for the loaders, 50 kHz for the firmware's commands);
+the kernel's snd-soc-as33970 driver now does the same at probe. See
+docs/hardware/BOARD.md.
 """
 
 from __future__ import annotations

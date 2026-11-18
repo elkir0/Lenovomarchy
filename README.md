@@ -13,9 +13,9 @@ made for it applies here.
 
 The tablet runs Linux only: kernel 7.1 branch `yt11` from `boot_a`, root
 file system on `userdata`, Omarchy 4.5 with the Omarchy Mobile touch shell.
-Display, touch, GPU, Wi-Fi, Bluetooth, speakers, battery, USB, sensors and
-auto-rotation, both cameras (with the omacam app) and s2idle sleep work.
-The microphones, deep sleep and hardware video decoding do not yet.
+Display, touch, GPU, Wi-Fi, Bluetooth, speakers, microphones, battery, USB,
+sensors and auto-rotation, both cameras (with the omacam app) and s2idle
+sleep work. Deep sleep and hardware video decoding do not yet.
 
 [ROADMAP.md](ROADMAP.md) has the component-by-component status and the
 milestones. Facts read from the unit are in [docs/hardware/](docs/hardware/).
