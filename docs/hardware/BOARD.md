@@ -115,6 +115,26 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
   1.733 GHz (little) and 884 MHz (GPU), released once the real
   temperature returns.
 
+## Vibrator (2026-11-18)
+
+- ERM motor on the MT6359 `vibr` LDO, as on begonia; the stock node
+  (`mediatek,vibrator`, `vib_vol = <0x09>`) selects VOSEL 9, 2.8 V in the
+  LDO's table. Kernel `yt11` 02f2dd449 adds a `regulator-haptic` node
+  (1.2-2.8 V): input device `regulator-haptic`. A rumble effect turns the
+  LDO on at 2.7 V for its length and off afterwards; nobody has felt the
+  buzz yet.
+
+## Charging (MT6360, 2026-11-18)
+
+- `mt6360-chg` binds and charges, but nothing sets the charge current: it
+  stays at the chip's 500 mA reset value (`constant_charge_current`;
+  input limit 2 A from the Type-C contract, CV 4.35 V). Measured on the
+  Mac's port: 465 mA into the battery. The stock DT charges at 3.7 A from
+  a charger (`ac_charger_current`, input 2.1 A), 500 mA from a computer
+  port, CV 4.43 V, with MediaTek's software JEITA lowering CV to 4.2 V
+  when hot and a 50 degrees C charge limit (`max_charge_temp`). Mainline
+  has no equivalent temperature handling for this charger.
+
 ## USB
 
 - USB-C through the MT6360 TCPC (`i2c5` 0x4e); a redriver control GPIO30 and
@@ -143,8 +163,29 @@ hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
   (`liteon,ltr578`, lux multiplier 80) and to the board DT. Tested by
   instantiating it by hand (`echo ltr578 0x53 >
   /sys/bus/i2c/devices/i2c-1/new_device`): `in_illuminance_input` 0.27
-  lux in a dark room, 0 with the screen off; not yet tested in light, and
-  the DT node is not flashed yet. The proximity part is not supported.
+  lux in a dark room, 0 with the screen off; not yet tested in light. The
+  DT node is in the daily kernel (the driver binds at boot). The proximity
+  part is not supported.
+- Auto-brightness: `yt11-autobrightness`, started by Hyprland
+  (`tablet.lua`), follows `monitor-sensor --light` and writes the sysfs
+  `brightness` of the backlight `omarchy-hw-display` names. The target is
+  a curve on log10(lux): 0 lux 5 %, 3 lux 15 %, 30 lux 35 %, 300 lux
+  65 %, 3000 lux 90 %, 10000 lux and above 100 %, clamped to 3-100 %. Lux
+  is smoothed with a time constant of 1 s when the light rises and 3 s
+  when it falls; the backlight moves only when the target is 4 points
+  away, in a 0.5 s ramp. Moving the brightness by hand (shell slider,
+  `omarchy brightness display`) keeps the difference from the curve as an
+  offset (-50 to +50 points, `~/.local/state/yt11/autobrightness-offset`)
+  and pauses the helper for 5 s. `yt11-autobrightness off`, `on` and
+  `toggle` switch it (off, it keeps running without writing); `status`
+  prints the state and the last lux and target. Nothing is written while
+  the panel is off (`bl_power` != 0) or at brightness 0, and readings
+  taken then are ignored. Measured on the unit (2026-11-18, dim room):
+  3.5 lux gave 16 %, a slider move to 50 % was kept as a +34 offset and
+  moving back to 16 % reset it; the reading did not change between 12 %
+  and 50 % brightness (no feedback from the panel's own light), and the
+  helper costs about 0.2 % of one core while idle. Not tested in daylight
+  yet.
 - Accelerometer + gyroscope: Bosch BMI220 (chip id 0x26) on GPIO63-66,
   which are SCP_SPI2 and also the AP's SPI2 (MI, CSB, MO, CLK; found by
   bit-banging the pins). Kernel `yt11` adds the BMI220 to the `bmi270`
