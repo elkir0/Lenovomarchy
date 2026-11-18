@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+"""yt11-autobrightness: set the panel backlight from the ambient light sensor
+that iio-sensor-proxy exposes (Lenovo YT-J706F, LTR-578ALS on i2c1).
+
+Follows `monitor-sensor --light` and writes the sysfs `brightness` of the
+backlight `omarchy-hw-display` names (else the first one in
+/sys/class/backlight). The target is a curve on log10(lux) (CURVE below)
+plus the user's offset, clamped to 3-100 %. Lux is smoothed by an
+exponential moving average (time constant 1 s when the light rises, 3 s
+when it falls: brighten fast, dim slowly), and the backlight only moves
+when the target is at least 4 points away, in a 0.5 s ramp.
+
+When the brightness read back is not what this helper wrote, the user moved
+it (shell slider, `omarchy brightness display`): the difference from the
+curve is kept as an offset ($XDG_STATE_HOME/yt11/autobrightness-offset,
+-50 to +50 points) and nothing is written for 5 s. Nothing is written while
+the panel is off (bl_power != 0) or at brightness 0, and readings taken
+then are ignored (the sensor reads 0 with the screen off).
+
+Usage: yt11-autobrightness [on|off|toggle|status]. No argument runs the
+helper; `off` (file autobrightness-off in the same state directory) leaves
+it running without writing. Started by the tablet layer of the Hyprland
+config (tablet.lua): polkit refuses the sensor claim outside the graphical
+session. For tests, YT11_BACKLIGHT_DIR, XDG_STATE_HOME and
+YT11_MONITOR_SENSOR override the backlight directory, the state directory
+and the monitor-sensor command.
+"""
+
+import fcntl
+import json
+import math
+import os
+import re
+import select
+import shlex
+import signal
+import subprocess
+import sys
+import time
+
+PROG = "yt11-autobrightness"
+USAGE = "usage: yt11-autobrightness [on|off|toggle|status]"
+
+# Brightness curve: (lux, percent) points, interpolated linearly on
+# log10(1 + lux). The +1 keeps 0 lux defined; above a few lux it is log10(lux).
+CURVE = (
+    (0.0, 5.0),
+    (3.0, 15.0),
+    (30.0, 35.0),
+    (300.0, 65.0),
+    (3000.0, 90.0),
+    (10000.0, 100.0),
+)
+MIN_PCT = 3.0
+MAX_PCT = 100.0
+
+TAU_RISE = 1.0  # s: smoothing time constant when the light rises
+TAU_FALL = 3.0  # s: when it falls
+HYSTERESIS = 4.0  # percentage points between target and current before moving
+RAMP_TIME = 0.5  # s
+RAMP_TICK = 0.05  # s between ramp steps
+IDLE_TICK = 1.0  # s between checks otherwise (off file, bl_power, slider)
+OVERRIDE_TOLERANCE = 0.01  # fraction of max_brightness
+OVERRIDE_HOLD = 5.0  # s without writing after a manual change
+OFFSET_LIMIT = 50.0  # percentage points
+RESTART_DELAY = 2.0  # s before starting monitor-sensor again
+
+SYS_BACKLIGHT = "/sys/class/backlight"
+OFF_FILE = "autobrightness-off"
+OFFSET_FILE = "autobrightness-offset"
+STATUS_FILE = "autobrightness-status"
+LOCK_FILE = "autobrightness.lock"
+
+
+def log(message):
+    try:
+        print(f"{PROG}: {message}", file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+# --- Pure functions --------------------------------------------------------
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def curve_pct(lux):
+    """Brightness percentage of the curve for a lux value (not clamped)."""
+    x = math.log10(1.0 + max(0.0, lux))
+    points = [(math.log10(1.0 + point_lux), pct) for point_lux, pct in CURVE]
+    if x <= points[0][0]:
+        return points[0][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return points[-1][1]
+
+
+def target_pct(lux, offset=0.0):
+    """Curve plus the user's offset, clamped to [MIN_PCT, MAX_PCT]."""
+    return clamp(curve_pct(lux) + offset, MIN_PCT, MAX_PCT)
+
+
+def smooth_step(smoothed, lux, dt, tau_rise=TAU_RISE, tau_fall=TAU_FALL):
+    """One step of the asymmetric exponential moving average of lux.
+
+    `smoothed` is None before the first reading, which is taken as is.
+    """
+    if smoothed is None:
+        return lux
+    if dt <= 0:
+        return smoothed
+    tau = tau_rise if lux > smoothed else tau_fall
+    return smoothed + (lux - smoothed) * (1.0 - math.exp(-dt / tau))
+
+
+def needs_move(target, current, threshold=HYSTERESIS):
+    """Hysteresis: move only when the target is `threshold` points away."""
+    return abs(target - current) >= threshold
+
+
+def pct_to_raw(pct, max_raw):
+    """Percentage to raw backlight units, rounded, never 0."""
+    return int(clamp(math.floor(pct * max_raw / 100.0 + 0.5), 1, max_raw))
+
+
+def raw_to_pct(raw, max_raw):
+    return 100.0 * raw / max_raw
+
+
+def is_manual_change(read_raw, written_raw, max_raw,
+                     tolerance=OVERRIDE_TOLERANCE):
+    """True when the brightness read back is not the last value written."""
+    if read_raw is None or written_raw is None:
+        return False
+    return abs(read_raw - written_raw) > tolerance * max_raw
+
+
+def override_offset(user_pct, curve):
+    """Offset that makes curve + offset give the user's brightness."""
+    return clamp(user_pct - curve, -OFFSET_LIMIT, OFFSET_LIMIT)
+
+
+def ramp_value(start_raw, end_raw, elapsed, duration=RAMP_TIME):
+    """Raw value `elapsed` seconds into a linear ramp from start to end."""
+    if duration <= 0 or elapsed >= duration:
+        return end_raw
+    fraction = max(0.0, elapsed) / duration
+    return int(math.floor(start_raw + (end_raw - start_raw) * fraction + 0.5))
+
+
+# monitor-sensor (iio-sensor-proxy src/monitor-sensor.c) prints, for --light:
+#   "=== Has ambient light sensor (value: %lf, unit: %s)"  initial state
+#   "=== No ambient light sensor"                          initial state
+#   "    Light changed: %lf (%s)"                          each change
+#   "--- Light sensor disappeared", "+++ Light sensor appeared",
+#   "--- iio-sensor-proxy vanished, waiting for it to appear"
+# It calls setlocale(LC_ALL, ""): %lf may use a decimal comma.
+_NUMBER = r"([-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?)"
+_HAS_LIGHT = re.compile(
+    r"Has ambient light sensor\s*\(\s*value:\s*" + _NUMBER + r"\s*(?:,|\))")
+_LIGHT_CHANGED = re.compile(r"Light changed:\s*" + _NUMBER + r"(?:\s|\(|$)")
+
+
+def _lux_value(text):
+    try:
+        value = float(text.replace(",", "."))
+    except ValueError:
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return value
+
+
+def parse_line(line):
+    """Parse one monitor-sensor line.
+
+    Returns ("lux", value), ("missing", None) when there is no light sensor,
+    ("gone", None) when it (or iio-sensor-proxy) went away, or None for
+    anything else, including malformed lines.
+    """
+    if isinstance(line, bytes):
+        line = line.decode("utf-8", "replace")
+    if not isinstance(line, str):
+        return None
+    match = _LIGHT_CHANGED.search(line) or _HAS_LIGHT.search(line)
+    if match:
+        value = _lux_value(match.group(1))
+        return None if value is None else ("lux", value)
+    if "No ambient light sensor" in line:
+        return ("missing", None)
+    if "Light sensor disappeared" in line or "iio-sensor-proxy vanished" in line:
+        return ("gone", None)
+    return None
+
+
+def format_status(enabled, data):
+    """Text printed by `status`: on/off, then the running helper's state."""
+    lines = ["on" if enabled else "off"]
+    if data:
+        lux = data.get("lux")
+        target = data.get("target")
+        offset = data.get("offset")
+        if isinstance(lux, (int, float)):
+            lines.append("lux " + f"{lux:.2f}".rstrip("0").rstrip("."))
+        else:
+            lines.append("lux -")
+        if isinstance(target, (int, float)):
+            lines.append(f"target {target:.0f}%")
+        else:
+            lines.append("target -")
+        if isinstance(offset, (int, float)):
+            lines.append(f"offset {offset:+.0f}")
+    return "\n".join(lines)
+
+
+# --- Files -----------------------------------------------------------------
+
+
+def state_dir(env=None):
+    env = os.environ if env is None else env
+    base = env.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "state")
+    return os.path.join(base, "yt11")
+
+
+def runtime_dir(env=None):
+    """Where the running helper keeps its status and lock (tmpfs if any)."""
+    env = os.environ if env is None else env
+    base = env.get("XDG_RUNTIME_DIR")
+    if base and os.path.isdir(base):
+        return os.path.join(base, "yt11")
+    return state_dir(env)
+
+
+def is_enabled(sdir):
+    return not os.path.exists(os.path.join(sdir, OFF_FILE))
+
+
+def set_enabled(sdir, enabled):
+    path = os.path.join(sdir, OFF_FILE)
+    if enabled:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    else:
+        os.makedirs(sdir, exist_ok=True)
+        with open(path, "w"):
+            pass
+
+
+def load_offset(sdir):
+    try:
+        with open(os.path.join(sdir, OFFSET_FILE)) as f:
+            value = float(f.read().strip())
+    except (OSError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return clamp(value, -OFFSET_LIMIT, OFFSET_LIMIT)
+
+
+def _write_atomic(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def save_offset(sdir, offset):
+    try:
+        os.makedirs(sdir, exist_ok=True)
+        _write_atomic(os.path.join(sdir, OFFSET_FILE), f"{offset:.1f}\n")
+    except OSError as e:
+        log(f"cannot save the offset: {e}")
+
+
+def _read_int(path):
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def find_backlight_dir(env=None, sys_dir=SYS_BACKLIGHT,
+                       hw_display="omarchy-hw-display"):
+    """YT11_BACKLIGHT_DIR, else the device omarchy-hw-display prints, else
+    the first entry of /sys/class/backlight; None when there is none."""
+    env = os.environ if env is None else env
+    override = env.get("YT11_BACKLIGHT_DIR")
+    if override:
+        return override if os.path.isdir(override) else None
+    try:
+        out = subprocess.run([hw_display], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    names = [line.strip() for line in out.splitlines() if line.strip()]
+    if names:
+        path = os.path.join(sys_dir, os.path.basename(names[0]))
+        if os.path.isdir(path):
+            return path
+    try:
+        entries = sorted(os.listdir(sys_dir))
+    except OSError:
+        return None
+    return os.path.join(sys_dir, entries[0]) if entries else None
+
+
+class Backlight:
+    """A sysfs backlight directory (brightness, max_brightness, bl_power)."""
+
+    def __init__(self, path):
+        self.path = path
+        self.brightness_path = os.path.join(path, "brightness")
+        self.max = _read_int(os.path.join(path, "max_brightness"))
+        self._write_failed = False
+
+    def brightness(self):
+        return _read_int(self.brightness_path)
+
+    def power(self):
+        value = _read_int(os.path.join(self.path, "bl_power"))
+        return 0 if value is None else value
+
+    def write(self, raw):
+        try:
+            with open(self.brightness_path, "w") as f:
+                f.write(f"{int(raw)}\n")
+        except OSError as e:
+            if not self._write_failed:
+                log(f"cannot write {self.brightness_path}: {e.strerror or e}")
+                self._write_failed = True
+            return False
+        self._write_failed = False
+        return True
+
+
+class Controller:
+    """Brightness logic driven by tick(now); I/O through a Backlight and the
+    state directory (off file, offset file)."""
+
+    def __init__(self, backlight, sdir, now):
+        self.bl = backlight
+        self.sdir = sdir
+        self.offset = load_offset(sdir)
+        self.lux = None  # last reading
+        self.smoothed = None
+        self.target = None  # percent
+        self.written = None  # last raw value written (or found, as baseline)
+        self.hold_until = 0.0
+        self.ramp = None  # (start_raw, end_raw, start_time)
+        self.guarded = False  # panel off or at 0: hands off
+        self.sensor = True
+        self._last = now
+
+    def feed(self, event):
+        """Apply an event from parse_line()."""
+        if not event:
+            return
+        kind, value = event
+        if kind == "lux":
+            self.sensor = True
+            if not self.guarded:
+                self.lux = value
+        elif kind == "gone":
+            self.sensor = False
+            self.ramp = None
+
+    def status(self):
+        return {
+            "pid": os.getpid(),
+            "lux": None if self.lux is None else round(self.lux, 2),
+            "target": None if self.target is None else round(self.target, 1),
+            "offset": round(self.offset, 1),
+        }
+
+    def tick(self, now):
+        """Advance to `now` (seconds, monotonic); returns the next delay."""
+        dt = max(0.0, now - self._last)
+        self._last = now
+        max_raw = self.bl.max
+        current = self.bl.brightness()
+        if not current or self.bl.power() != 0:
+            # Screen off or at 0 (or unreadable): touch nothing, take a new
+            # baseline when it comes back.
+            self.guarded = True
+            self.written = None
+            self.ramp = None
+            return IDLE_TICK
+        self.guarded = False
+
+        if self.lux is not None:
+            self.smoothed = smooth_step(self.smoothed, self.lux, dt)
+        if self.smoothed is not None:
+            self.target = target_pct(self.smoothed, self.offset)
+
+        if not is_enabled(self.sdir):
+            self.written = None
+            self.ramp = None
+            return IDLE_TICK
+
+        if self.written is None:
+            self.written = current
+        elif is_manual_change(current, self.written, max_raw):
+            # The user moved the brightness: follow it, keep the difference
+            # from the curve, and leave a drag in progress alone.
+            self.written = current
+            self.ramp = None
+            self.hold_until = now + OVERRIDE_HOLD
+            if self.smoothed is not None:
+                self.offset = override_offset(raw_to_pct(current, max_raw),
+                                              curve_pct(self.smoothed))
+                save_offset(self.sdir, self.offset)
+                self.target = target_pct(self.smoothed, self.offset)
+            return IDLE_TICK
+
+        if now < self.hold_until or self.target is None or not self.sensor:
+            self.ramp = None
+            return IDLE_TICK
+
+        if self.ramp is None:
+            if not needs_move(self.target, raw_to_pct(current, max_raw)):
+                return IDLE_TICK
+            end = pct_to_raw(self.target, max_raw)
+            if end == current:
+                return IDLE_TICK
+            self.ramp = (current, end, now)
+
+        start, end, start_time = self.ramp
+        elapsed = now - start_time
+        value = ramp_value(start, end, elapsed)
+        if value != current:
+            if not self.bl.write(value):
+                self.ramp = None
+                return IDLE_TICK
+            self.written = value
+        if elapsed >= RAMP_TIME:
+            self.ramp = None
+            return IDLE_TICK
+        return RAMP_TICK
+
+
+# --- Daemon ----------------------------------------------------------------
+
+
+class _Stop(Exception):
+    pass
+
+
+def _on_signal(signum, frame):
+    raise _Stop()
+
+
+def monitor_command(env=None):
+    env = os.environ if env is None else env
+    raw = env.get("YT11_MONITOR_SENSOR") or "monitor-sensor"
+    try:
+        cmd = shlex.split(raw)
+    except ValueError:
+        cmd = [raw]
+    return (cmd or ["monitor-sensor"]) + ["--light"]
+
+
+def take_lock(rdir):
+    """Lock against a second instance: fd, -1 if no lock file, None if held."""
+    try:
+        fd = os.open(os.path.join(rdir, LOCK_FILE), os.O_RDWR | os.O_CREAT,
+                     0o600)
+    except OSError:
+        return -1
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def write_status(rdir, data):
+    try:
+        _write_atomic(os.path.join(rdir, STATUS_FILE), json.dumps(data) + "\n")
+    except OSError:
+        pass
+
+
+def read_status(rdir):
+    """The running helper's status, or None when it is not running."""
+    try:
+        with open(os.path.join(rdir, STATUS_FILE)) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    pid = data.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except OSError:
+        return None
+    return data
+
+
+def _stop_child(child, grace=0.0):
+    """Wait `grace` seconds for the child to exit, then terminate it."""
+    if child is None:
+        return None
+    if grace > 0:
+        try:
+            child.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            pass
+    if child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+    if child.stdout:
+        child.stdout.close()
+    return child.returncode
+
+
+def run_daemon(env=None):
+    env = os.environ if env is None else env
+    path = find_backlight_dir(env)
+    if path is None:
+        log("no backlight device, exiting")
+        return 0
+    bl = Backlight(path)
+    if not bl.max or bl.max <= 0 or bl.brightness() is None:
+        log(f"{path}: no readable brightness, exiting")
+        return 0
+    if not os.access(bl.brightness_path, os.W_OK):
+        log(f"{bl.brightness_path} is not writable, exiting")
+        return 0
+    sdir = state_dir(env)
+    rdir = runtime_dir(env)
+    try:
+        os.makedirs(sdir, exist_ok=True)
+        os.makedirs(rdir, exist_ok=True)
+    except OSError as e:
+        log(f"cannot create the state directory: {e}, exiting")
+        return 0
+    if take_lock(rdir) is None:
+        log("already running, exiting")
+        return 0
+
+    cmd = monitor_command(env)
+    child_env = dict(env, LC_ALL="C")
+    ctl = Controller(bl, sdir, time.monotonic())
+    child = None
+    restart_at = 0.0
+    exit_logged = False
+    last_status = None
+    buf = b""
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(signum, _on_signal)
+    try:
+        while True:
+            now = time.monotonic()
+            if child is None and now >= restart_at:
+                try:
+                    child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE,
+                                             env=child_env)
+                except OSError as e:
+                    log(f"cannot run {cmd[0]}: {e.strerror or e}, exiting")
+                    return 0
+                buf = b""
+            delay = ctl.tick(now)
+            status = ctl.status()
+            if status != last_status:
+                write_status(rdir, status)
+                last_status = status
+            if child is None:
+                time.sleep(max(0.0, min(delay, restart_at - now)))
+                continue
+            fd = child.stdout.fileno()
+            ready, _, _ = select.select([fd], [], [], delay)
+            if not ready:
+                continue
+            try:
+                data = os.read(fd, 4096)
+            except OSError:
+                data = b""
+            if not data:
+                # monitor-sensor exits when iio-sensor-proxy restarts or the
+                # claim fails: start it again.
+                code = _stop_child(child, grace=1.0)
+                child = None
+                restart_at = time.monotonic() + RESTART_DELAY
+                if not exit_logged:
+                    log(f"monitor-sensor exited ({code}), restarting it")
+                    exit_logged = True
+                continue
+            buf += data
+            *lines, buf = buf.split(b"\n")
+            if len(buf) > 4096:
+                buf = b""
+            for line in lines:
+                event = parse_line(line)
+                if event is None:
+                    continue
+                if event[0] == "missing":
+                    log("no ambient light sensor, exiting")
+                    return 0
+                if event[0] == "lux":
+                    exit_logged = False
+                ctl.feed(event)
+    except _Stop:
+        return 0
+    finally:
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(signum, signal.SIG_IGN)
+        _stop_child(child)
+        try:
+            os.remove(os.path.join(rdir, STATUS_FILE))
+        except OSError:
+            pass
+
+
+def main(argv):
+    if not argv:
+        return run_daemon()
+    command = argv[0]
+    if command in ("-h", "--help"):
+        print(USAGE)
+        return 0
+    if len(argv) > 1 or command not in ("on", "off", "toggle", "status"):
+        print(USAGE, file=sys.stderr)
+        return 2
+    sdir = state_dir()
+    if command == "status":
+        print(format_status(is_enabled(sdir), read_status(runtime_dir())))
+        return 0
+    enabled = (not is_enabled(sdir)) if command == "toggle" else command == "on"
+    try:
+        set_enabled(sdir, enabled)
+    except OSError as e:
+        log(f"cannot change the state: {e}")
+        return 1
+    print("on" if enabled else "off")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

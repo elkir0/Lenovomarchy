@@ -21,6 +21,9 @@ o.launch_on_start("bash -c 'omarchy-toggle-enabled lock-on-start || exit 0; "
 -- and the touch/pen layer.
 o.launch_on_start("yt11-autorotate")
 
+-- Auto-brightness from the ambient light sensor (yt11-autobrightness on/off/status).
+o.launch_on_start("yt11-autobrightness")
+
 -- Fit floating windows to the portrait/landscape tablet screen (800x1333 logical at scale 1.5).
 o.window({ tag = "floating-window" }, { size = { "(monitor_w*0.92)", "(monitor_h*0.65)" } })
 o.window("org.omarchy.about", { size = { "(monitor_w*0.92)", "(monitor_h*0.50)" } })
