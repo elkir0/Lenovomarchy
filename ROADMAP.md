@@ -45,7 +45,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Piece | State | Notes |
 |---|---|---|
 | Omarchy 4.5.0-3 + Omarchy Mobile 0.1.48 / shell 0.2.133 | works | `docs/research/omamobile/STATUS-20261117.md` |
-| Image build (`image/build-rootfs.sh`) | works | Builds what the tablet runs; a fresh flash of it not yet tested |
+| Image build (`image/build-rootfs.sh`) | works | Fresh flash on a wiped `userdata` tested on 2026-11-18 (`image/README.md`, Fresh install); the non-redistributable firmware is installed afterwards over USB |
 | Firewall (ufw) | works | IPv6 rules load since 2026-11-18 |
 | Lock-screen keypad, shell gestures | untested | Need a person at the screen |
 | `omarchy update` on the tablet | untested | Migrations to hold are listed in `image/rootfs/omarchy-migrations.hold` |
@@ -64,8 +64,9 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - [ ] With the owner: feel the vibrator, insert a microSD card, try the pen,
       unlock with the keypad, the shell gestures, photo/video in omacam.
 - [ ] Run `omarchy update` once on the tablet and keep the hold list current.
-- [ ] Flash the image `image/build-rootfs.sh` produces on a wiped `userdata`
-      and go through first boot.
+- [x] Flash the image `image/build-rootfs.sh` produces on a wiped `userdata`
+      and go through first boot (2026-11-18; the build now ships the A/B
+      slot service, `tools/flash-rootfs.sh` writes the image).
 
 ### R2: camera quality
 

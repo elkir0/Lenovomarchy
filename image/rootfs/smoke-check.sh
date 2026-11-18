@@ -53,6 +53,7 @@ for link in \
     /etc/systemd/system/multi-user.target.wants/lenovomarchy-resize-rootfs.service \
     /etc/systemd/system/multi-user.target.wants/yt11-sensor-firmware.service \
     /etc/systemd/system/multi-user.target.wants/yt11-charge-guard.service \
+    /etc/systemd/system/multi-user.target.wants/yt11-boot-successful.service \
     /etc/systemd/system/multi-user.target.wants/sshd.service \
     /etc/systemd/system/multi-user.target.wants/NetworkManager.service \
     /etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service; do
@@ -62,6 +63,12 @@ for link in \
         fail "service symlink missing: $link"
     fi
 done
+
+if [[ -x /usr/local/sbin/yt11-bootctl ]]; then
+    pass "A/B slot tool present: /usr/local/sbin/yt11-bootctl"
+else
+    fail "A/B slot tool missing: /usr/local/sbin/yt11-bootctl"
+fi
 
 # 6. SSH authorized_keys and modes
 for d in /root/.ssh /home/alarm/.ssh; do

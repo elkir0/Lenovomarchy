@@ -137,6 +137,9 @@ mkdir -p "$CTX_DIR/repo" "$CTX_DIR/overlay"
 
 cp -a "$SCRIPT_DIR/rootfs/." "$CTX_DIR/"
 cp -a "$SCRIPT_DIR/overlay/." "$CTX_DIR/overlay/"
+# The A/B slot tool is the initramfs' own copy (yt11-boot-successful.service).
+install -Dm755 "$ROOT_DIR/initramfs/files/usr/sbin/yt11-bootctl" \
+    "$CTX_DIR/overlay/usr/local/sbin/yt11-bootctl"
 cp -a "$REPO_ARCH_DIR/." "$CTX_DIR/repo/"
 # The omamobile-shell package ships the tablet profiles itself
 # (usr/share/omamobile/shell/profile/{shell,home}.json are tablet-shell.json /

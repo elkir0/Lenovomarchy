@@ -1,0 +1,13 @@
+# The A/B bootloader counts boot attempts and falls back to the other slot
+# when none is marked successful: mark this slot once the system is up.
+[Unit]
+Description=Mark this A/B boot slot successful
+After=multi-user.target
+ConditionPathExists=/usr/local/sbin/yt11-bootctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/yt11-bootctl mark-successful
+
+[Install]
+WantedBy=multi-user.target

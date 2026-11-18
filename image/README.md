@@ -104,6 +104,31 @@ bash image/tools/build-pkg omamobile-shell
 bash image/tools/build-pkg --src image/camera/libcamera-yt11 libcamera
 ```
 
+## Fresh install
+
+Tested on 2026-11-18 on the unit (wiped `userdata`, first boot to the
+Omarchy session in about 30 s, root grown to the partition's 110 GiB, slot
+marked successful, no failed unit):
+
+```bash
+bash kernel/kbuild.sh
+cp out/kernel/modules.tar.xz out/kernel/kernel.release input/
+bash image/build-rootfs.sh
+tools/flash-rootfs.sh out/rootfs/rootfs-omarchy-aarch64.img
+tools/flash-slot.sh a <boot.img> <dtbo.img>      # tools/mkboot.sh output
+# once the tablet answers on the USB network (192.168.77.1):
+tools/touch-firmware.sh <super.img> --install    # no touch without it
+tools/amp-firmware.sh <super.img> --install      # speakers' protection DSP
+tools/mic-firmware.sh <super.img> --install      # no microphones without it
+tools/ytssh systemctl reboot
+```
+
+The three firmware sets are Lenovo's and are not redistributable: they come
+from the unit's own stock `super` image, so the first boot has no touch,
+and the speakers play without their protection DSP, until they are
+installed over USB. Wi-Fi is then set up on the tablet. The bring-up probes
+(`yt11-dsirate` and the like) are not part of the image.
+
 A full build downloads the pinned Omarchy/Omarchy Mobile packages (cached in
 `cache/`), compiles `omamobile-omarchy`, `omamobile-shell` and the libcamera
 split package inside arm64 Docker containers (libcamera is the slow one), then
