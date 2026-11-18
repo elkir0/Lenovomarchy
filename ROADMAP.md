@@ -23,7 +23,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Speakers (4x CS35L41) | works | Stereo through the protection DSP; no factory calibration |
 | Microphones (AS33970 voice processor) | missing | Firmware upload acknowledged, firmware never starts (`BOARD.md`, Audio wiring) |
 | Battery gauge (bq27541) | works | |
-| Charging (MT6360) | partial | Charge current left at the chip's 500 mA reset value (stock: 3.7 A with software temperature derating); no temperature guard |
+| Charging (MT6360) | works | 2 A with a temperature guard (`yt11-charge-guard`, cut from 45 °C); not tested from a wall charger yet |
 | USB-C (MT6360 TCPC, mtu3) | works | Gadget network to the Mac, role switch |
 | microSD (MSDC, SDR104) | untested | Node matches the stock DT; needs a card in the slot |
 | Vibrator (ERM on MT6359 VIBR) | partial | Since 2026-11-18: the LDO switches with a rumble effect; buzz not yet felt by a person |
@@ -59,9 +59,8 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - [x] Vibrator in the device tree.
 - [x] Auto-brightness helper from the light sensor (`yt11-autobrightness`).
 - [ ] Auto-brightness in daylight.
-- [ ] Charge current: raise it from 500 mA (about 2 A proposed, well under the
-      stock 3.7 A) together with a battery temperature guard, since mainline
-      has none of the stock software JEITA derating. Owner's decision.
+- [x] Charge current 2 A with a battery temperature guard (`yt11-charge-guard`).
+- [ ] Charging from a wall charger (USB PD) and over a full charge.
 - [ ] With the owner: feel the vibrator, insert a microSD card, try the pen,
       unlock with the keypad, the shell gestures, photo/video in omacam.
 - [ ] Run `omarchy update` once on the tablet and keep the hold list current.

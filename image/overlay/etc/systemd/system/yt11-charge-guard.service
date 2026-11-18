@@ -1,0 +1,13 @@
+[Unit]
+Description=Charge current from the battery temperature (2 A, cut when hot)
+After=sysinit.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/yt11-charge-guard
+ExecStopPost=/usr/local/sbin/yt11-charge-guard --safe
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

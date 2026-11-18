@@ -134,6 +134,18 @@ microSD slot. Here it is the SDIO Wi-Fi, and the microSD is on `mmc0`.
   port, CV 4.43 V, with MediaTek's software JEITA lowering CV to 4.2 V
   when hot and a 50 degrees C charge limit (`max_charge_temp`). Mainline
   has no equivalent temperature handling for this charger.
+- `yt11-charge-guard` (system service, since 2026-11-18) sets the charge
+  current from the bq27541's temperature: 2 A from 10 to 45 degrees C,
+  500 mA from 0 to 10, 100 mA (the charger's minimum; the cable still
+  powers the tablet) below 0 or from 45, each band left 3 degrees past its
+  edge; 500 mA when the temperature is unreadable or the service stops.
+  It rewrites the value every 15 s if something reset it. Nothing watches
+  the temperature during system sleep, so the sleep hook caps the current
+  at 1 A, or 500 mA from 40 degrees C. CV stays at the chip's 4.35 V
+  (stock: 4.43 V). Measured on the Mac's port at 91 %: 463 mA into the
+  battery before, about 1.1 A after (the 2 A input limit at 5 V is the
+  ceiling there); a 100 mA write brings the battery current to about
+  50 mA. Not tested from a wall charger or a hot battery yet.
 
 ## USB
 

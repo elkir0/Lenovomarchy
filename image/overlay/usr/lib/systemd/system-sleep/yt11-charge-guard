@@ -1,0 +1,10 @@
+#!/bin/sh
+# systemd-sleep hook: nothing watches the battery temperature while the
+# tablet sleeps, so cap the charge current before sleep (1 A, 500 mA from
+# 40 degrees C; never above what yt11-charge-guard had set). The guard
+# raises it again within one interval after resume.
+# See docs/hardware/BOARD.md (Charging).
+case "$1" in
+pre) exec /usr/local/sbin/yt11-charge-guard --sleep ;;
+esac
+exit 0

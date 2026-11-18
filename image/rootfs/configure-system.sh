@@ -110,6 +110,7 @@ systemctl enable \
     lenovomarchy-resize-rootfs.service \
     yt11-wifi-after-bt.service \
     yt11-sensor-firmware.service \
+    yt11-charge-guard.service \
     serial-getty@ttyGS0.service
 
 # Mask wait-online so boot never hangs offline, and iwd, which conflicts

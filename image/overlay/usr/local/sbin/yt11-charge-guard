@@ -1,0 +1,199 @@
+#!/bin/bash
+# yt11-charge-guard: set the MT6360 charge current from the battery
+# temperature (Lenovo YT-J706F).
+#
+# Mainline's mt6360-chg leaves the charge current at the chip's reset value,
+# 500 mA, and has nothing like the stock kernel's software JEITA (CV lowered
+# when hot, charging stopped above 50 degrees C). This guard raises the
+# current to 2 A only while it is watching the bq27541's temperature:
+#
+#   below  0 degrees C   100 mA (the charger's minimum: the cable still powers
+#                        the tablet, the battery takes almost nothing)
+#   0 to 10 degrees C    500 mA
+#   10 to 45 degrees C   2 A
+#   45 degrees C and up  100 mA
+#
+# Each band is left 3 degrees C past its edge (45 -> back to 2 A at 42).
+# An unreadable temperature, or the guard stopping, means 500 mA, the value
+# the tablet charged at before the guard existed. The current is checked
+# every interval and written again if something reset it (a charger replug).
+# The stock charge voltage (4.43 V) is not restored: the chip's 4.35 V stays.
+#
+# Usage: yt11-charge-guard [--once | --sleep | --safe]
+#   (no option)  run as the service, until SIGTERM
+#   --once       apply the band for the current temperature and exit
+#   --safe       set 500 mA and exit (the service's ExecStopPost)
+#   --sleep      before system sleep: at most 1 A, at most 500 mA from
+#                40 degrees C (nothing watches the temperature while asleep)
+# Environment (tests): YT11_POWER_SUPPLY_DIR, YT11_CHARGE_GUARD_INTERVAL.
+
+set -u
+
+SYS=${YT11_POWER_SUPPLY_DIR:-/sys/class/power_supply}
+INTERVAL=${YT11_CHARGE_GUARD_INTERVAL:-15}
+
+CUT=100000
+COLD=500000
+NORMAL=2000000
+SAFE=500000
+SLEEP_MAX=1000000
+SLEEP_WARM=400		# tenths of degree C
+SLEEP_WARM_MAX=500000
+
+log() { echo "yt11-charge-guard: $*" >&2; }
+
+# The battery: a supply of type Battery with a temperature.
+battery=
+# The charger: a supply whose charge current can be written.
+charger=
+find_supplies() {
+	local d
+	battery=
+	charger=
+	for d in "$SYS"/*; do
+		[ -r "$d/type" ] || continue
+		case "$(cat "$d/type" 2>/dev/null)" in
+		Battery)
+			[ -z "$battery" ] && [ -r "$d/temp" ] && battery=$d ;;
+		*)
+			[ -z "$charger" ] && [ -w "$d/constant_charge_current" ] &&
+				charger=$d ;;
+		esac
+	done
+}
+
+# Battery temperature in tenths of degree C, or nothing.
+read_temp() {
+	local t
+	t=$(cat "$battery/temp" 2>/dev/null) || return 0
+	case "$t" in
+	''|*[!0-9-]*|-|*?-*) return 0 ;;
+	esac
+	# The gauge reads 0xffff-like garbage when its bus misbehaves: refuse
+	# anything outside -40..+100 degrees C.
+	[ "$t" -ge -400 ] && [ "$t" -le 1000 ] && echo "$t"
+}
+
+# band <temp> <previous band> -> cold-cut | cold | normal | hot
+band_for() {
+	local t=$1 prev=$2
+	if [ "$t" -ge 450 ] || { [ "$prev" = hot ] && [ "$t" -gt 420 ]; }; then
+		echo hot
+	elif [ "$t" -lt 0 ] || { [ "$prev" = cold-cut ] && [ "$t" -lt 30 ]; }; then
+		echo cold-cut
+	elif [ "$t" -lt 100 ]; then
+		echo cold
+	elif { [ "$prev" = cold ] || [ "$prev" = cold-cut ]; } && [ "$t" -lt 130 ]; then
+		echo cold
+	else
+		echo normal
+	fi
+}
+
+current_for() {
+	case "$1" in
+	cold-cut|hot) echo "$CUT" ;;
+	cold) echo "$COLD" ;;
+	normal) echo "$NORMAL" ;;
+	*) echo "$SAFE" ;;
+	esac
+}
+
+# set_current <uA> [reason]: write it unless already there; never above the
+# charger's own maximum.
+set_current() {
+	local want=$1 cur max
+	max=$(cat "$charger/constant_charge_current_max" 2>/dev/null)
+	case "$max" in ''|*[!0-9]*) ;; *) [ "$want" -gt "$max" ] && want=$max ;; esac
+	cur=$(cat "$charger/constant_charge_current" 2>/dev/null)
+	[ "$cur" = "$want" ] && return 0
+	if echo "$want" > "$charger/constant_charge_current" 2>/dev/null; then
+		[ -n "${2:-}" ] && log "$2: charge current $((want / 1000)) mA (was $((${cur:-0} / 1000)) mA)"
+		return 0
+	fi
+	log "cannot write $charger/constant_charge_current"
+	return 1
+}
+
+fmt_temp() {
+	local t=$1 sign=
+	[ "$t" -lt 0 ] && { sign=-; t=$(( -t )); }
+	echo "$sign$((t / 10)).$((t % 10)) C"
+}
+
+band=
+apply() {
+	local t new want
+	t=$(read_temp)
+	if [ -z "$t" ]; then
+		new=unknown
+		want=$SAFE
+	else
+		new=$(band_for "$t" "$band")
+		want=$(current_for "$new")
+	fi
+	if [ "$new" != "$band" ]; then
+		if [ -n "$t" ]; then
+			set_current "$want" "battery $(fmt_temp "$t"), $new"
+		else
+			set_current "$want" "battery temperature unreadable"
+		fi
+	else
+		set_current "$want" "$new band reapplied"
+	fi
+	band=$new
+}
+
+find_supplies
+if [ -z "$charger" ]; then
+	log "no charger with a writable charge current, exiting"
+	exit 0
+fi
+if [ -z "$battery" ]; then
+	log "no battery temperature, keeping $((SAFE / 1000)) mA"
+	set_current "$SAFE"
+	exit 0
+fi
+
+case "${1:-}" in
+--once)
+	apply
+	exit 0
+	;;
+--sleep)
+	t=$(read_temp)
+	cur=$(cat "$charger/constant_charge_current" 2>/dev/null)
+	case "$cur" in ''|*[!0-9]*) cur=$SAFE ;; esac
+	want=$SLEEP_MAX
+	[ -z "$t" ] && want=$SAFE
+	[ -n "$t" ] && [ "$t" -ge "$SLEEP_WARM" ] && want=$SLEEP_WARM_MAX
+	[ "$cur" -lt "$want" ] && want=$cur
+	set_current "$want"
+	exit 0
+	;;
+--safe)
+	set_current "$SAFE"
+	exit 0
+	;;
+'')
+	;;
+*)
+	echo "usage: yt11-charge-guard [--once | --sleep | --safe]" >&2
+	exit 2
+	;;
+esac
+
+sleeper=
+stop() {
+	[ -n "$sleeper" ] && kill "$sleeper" 2>/dev/null
+	set_current "$SAFE" "stopping"
+	exit 0
+}
+trap stop TERM INT HUP
+
+while :; do
+	apply
+	sleep "$INTERVAL" &
+	sleeper=$!
+	wait "$sleeper"
+done
