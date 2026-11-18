@@ -29,7 +29,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Vibrator (ERM on MT6359 VIBR) | partial | Since 2026-11-18: the LDO switches with a rumble effect; buzz not yet felt by a person |
 | Buttons (power, volume) | works | |
 | Accelerometer + gyroscope (BMI220) | works | Auto-rotation in all four positions |
-| Light sensor (LTR-578) | partial | Reads lux, drives auto-brightness (`yt11-autobrightness`); only tested in a dim room |
+| Light sensor (LTR-578) | partial | Reads lux, drives auto-brightness (`yt11-autobrightness`); curve raised on 2026-11-18 (0.3 lux gives 22 %); only tested in a dim or dark room |
 | Proximity | missing | LTR-578 proximity part and the device at i2c1 0x29 not supported |
 | Rear camera (OV8856) | partial | libcamera + omacam, autofocus, stock colour matrices; no lens shading correction, AF ~18 s to settle at app start |
 | Front camera (S5K4H7) | partial | libcamera + omacam, stock colour matrices; no lens shading correction |

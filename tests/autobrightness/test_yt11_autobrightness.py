@@ -80,30 +80,32 @@ class CurveTest(unittest.TestCase):
             self.assertAlmostEqual(ab.curve_pct(lux), pct, places=9, msg=lux)
 
     def test_points_table(self):
-        self.assertEqual(ab.CURVE, ((0.0, 5.0), (3.0, 15.0), (30.0, 35.0),
-                                    (300.0, 65.0), (3000.0, 90.0),
+        self.assertEqual(ab.CURVE, ((0.0, 20.0), (3.0, 30.0), (30.0, 45.0),
+                                    (300.0, 70.0), (3000.0, 95.0),
                                     (10000.0, 100.0)))
 
     def test_interpolated_on_log_lux(self):
         # Halfway between 3 and 30 lux on the log10(1 + lux) axis.
         mid = 10 ** ((math.log10(4) + math.log10(31)) / 2) - 1
-        self.assertAlmostEqual(ab.curve_pct(mid), 25.0, places=9)
-        self.assertLess(ab.curve_pct(1000), 90.0)
-        self.assertGreater(ab.curve_pct(1000), 65.0)
+        self.assertAlmostEqual(
+            ab.curve_pct(mid), (ab.curve_pct(3) + ab.curve_pct(30)) / 2,
+            places=9)
+        self.assertLess(ab.curve_pct(1000), ab.curve_pct(3000))
+        self.assertGreater(ab.curve_pct(1000), ab.curve_pct(300))
 
     def test_monotonic(self):
         values = [ab.curve_pct(10 ** (e / 10)) for e in range(-30, 51)]
         self.assertEqual(values, sorted(values))
 
     def test_ends(self):
-        self.assertEqual(ab.curve_pct(-5), 5.0)
-        self.assertEqual(ab.curve_pct(10000), 100.0)
-        self.assertEqual(ab.curve_pct(1e6), 100.0)
+        self.assertEqual(ab.curve_pct(-5), ab.CURVE[0][1])
+        self.assertEqual(ab.curve_pct(10000), ab.CURVE[-1][1])
+        self.assertEqual(ab.curve_pct(1e6), ab.CURVE[-1][1])
 
     def test_target_clamped(self):
         self.assertEqual(ab.target_pct(0, -50), 3.0)
         self.assertEqual(ab.target_pct(3000, 50), 100.0)
-        self.assertAlmostEqual(ab.target_pct(300, -10), 55.0)
+        self.assertAlmostEqual(ab.target_pct(300, -10), ab.curve_pct(300) - 10)
         for lux in (0, 1, 50, 1e5):
             for offset in (-50, 0, 50):
                 self.assertGreaterEqual(ab.target_pct(lux, offset), 3.0)
@@ -374,14 +376,15 @@ class ControllerTest(TempDirTest):
         write_file(os.path.join(self.path, name), f"{value}\n")
 
     def test_ramps_to_curve(self):
+        target = raw(ab.curve_pct(300.0))
         self.make(brightness=2048)
         self.lux(300.0)
         self.advance(1.0)
-        self.assertEqual(self.brightness(), raw(65))
+        self.assertEqual(self.brightness(), target)
         values = [v for _, v in self.writes]
         self.assertGreaterEqual(len(values), 5)  # small steps
         self.assertEqual(values, sorted(values))
-        self.assertEqual(values[-1], raw(65))
+        self.assertEqual(values[-1], target)
         self.assertTrue(all(v >= 1 for v in values))
         span = self.writes[-1][0] - self.writes[0][0]
         self.assertGreater(span, 0.3)
@@ -393,26 +396,27 @@ class ControllerTest(TempDirTest):
         self.make(brightness=2048)
         self.lux(0.0)
         self.advance(2.0)
-        self.assertEqual(self.brightness(), raw(5))
+        self.assertEqual(self.brightness(), raw(ab.curve_pct(0.0)))
         self.assertTrue(all(v >= 1 for _, v in self.writes))
 
     def test_hysteresis(self):
-        self.make(brightness=raw(62))  # target 65: 3 points away
+        base = ab.curve_pct(300.0) - 3
+        self.make(brightness=raw(base))  # 3 points away from target at 300 lux
         self.lux(300.0)
         self.advance(3.0)
         self.assertEqual(self.writes, [])
-        self.lux(320.0)  # target ~65.7: still under 4 points
+        self.lux(320.0)  # still under 4 points
         self.advance(8.0)
         self.assertEqual(self.writes, [])
-        self.lux(500.0)  # target ~70.5: moves, then stays within 4 points
+        self.lux(500.0)  # moves, then stays within 4 points
         self.advance(16.0)
         self.assertTrue(self.writes)
         pct = ab.raw_to_pct(self.brightness(), MAX)
-        self.assertGreater(pct, 66.0)
+        self.assertGreater(pct, base + 4.0)
         self.assertLess(abs(pct - ab.target_pct(500.0)), 4.0)
 
     def test_asymmetric_in_controller(self):
-        self.make(brightness=raw(65))
+        self.make(brightness=raw(ab.curve_pct(300.0)))
         self.lux(300.0)
         self.ctl.tick(0.0)
         self.assertEqual(self.ctl.smoothed, 300.0)
@@ -426,13 +430,14 @@ class ControllerTest(TempDirTest):
                                3000 - (3000 - start) * math.exp(-1))
 
     def test_manual_override(self):
+        base = ab.curve_pct(300.0)
         self.make(brightness=2048)
         self.lux(300.0)
         self.advance(1.0)
-        self.assertEqual(self.brightness(), raw(65))
+        self.assertEqual(self.brightness(), raw(base))
         self.writes.clear()
-        # The user drags the slider: 70 %, 75 %, then 80 %.
-        for pct in (70, 75, 80):
+        # The user drags the slider: +5, +10, then +15 points.
+        for pct in (base + 5, base + 10, base + 15):
             self.set_file("brightness", raw(pct))
             drag_end = self.now
             self.advance(self.now + 1.0)
@@ -444,20 +449,21 @@ class ControllerTest(TempDirTest):
         self.lux(3000.0)
         self.advance(drag_end + 4.9)
         self.assertEqual(self.writes, [])
-        self.assertEqual(self.brightness(), raw(80))
-        # Then curve + offset (90 + 15, clamped to 100).
+        self.assertEqual(self.brightness(), raw(base + 15))
+        # Then curve + offset (95 + 15, clamped to 100).
         self.advance(drag_end + 7.0)
         self.assertEqual(self.brightness(), MAX)
 
     def test_offset_applies_both_ways(self):
+        low = ab.curve_pct(300.0) - 30
         self.make(brightness=2048)
         self.lux(300.0)
         self.advance(1.0)
-        self.set_file("brightness", raw(45))  # 20 points under the curve
+        self.set_file("brightness", raw(low))  # 30 points under the curve
         self.advance(7.0)
-        self.assertAlmostEqual(self.ctl.offset, -20.0, places=1)
-        self.assertEqual(self.brightness(), raw(45))
-        self.lux(3.0)  # curve 15 - 20: clamped to 3 %
+        self.assertAlmostEqual(self.ctl.offset, -30.0, places=1)
+        self.assertEqual(self.brightness(), raw(low))
+        self.lux(3.0)  # curve 30 - 30: clamped to 3 %
         self.advance(40.0)
         self.assertAlmostEqual(self.ctl.target, 3.0)
         pct = ab.raw_to_pct(self.brightness(), MAX)
@@ -468,7 +474,7 @@ class ControllerTest(TempDirTest):
         self.make(brightness=2048)
         self.lux(300.0)
         self.advance(1.0)
-        self.set_file("brightness", raw(75))  # offset +10
+        self.set_file("brightness", raw(ab.curve_pct(300.0) + 10))  # offset +10
         self.advance(7.0)
         ab.set_enabled(self.sdir, False)
         self.advance(8.0)
@@ -509,7 +515,7 @@ class ControllerTest(TempDirTest):
         self.assertEqual(self.brightness(), 1000)
         self.set_file("bl_power", 0)
         self.advance(7.0)
-        self.assertEqual(self.brightness(), raw(65))
+        self.assertEqual(self.brightness(), raw(ab.curve_pct(300.0)))
         self.assertEqual(self.ctl.offset, 0.0)
         self.assertFalse(os.path.exists(
             os.path.join(self.sdir, "autobrightness-offset")))
@@ -531,7 +537,7 @@ class ControllerTest(TempDirTest):
         self.assertEqual(self.brightness(), 0)
         self.set_file("brightness", 2048)
         self.advance(6.0)
-        self.assertEqual(self.brightness(), raw(65))
+        self.assertEqual(self.brightness(), raw(ab.curve_pct(300.0)))
         self.assertEqual(self.ctl.offset, 0.0)
 
     def test_sensor_gone(self):
@@ -539,7 +545,7 @@ class ControllerTest(TempDirTest):
         self.ctl.feed(("gone", None))
         self.lux(300.0)  # back
         self.advance(1.0)
-        self.assertEqual(self.brightness(), raw(65))
+        self.assertEqual(self.brightness(), raw(ab.curve_pct(300.0)))
         self.ctl.feed(("gone", None))
         self.writes.clear()
         self.ctl.lux = 3000.0
@@ -651,15 +657,17 @@ class DaemonTest(TempDirTest):
         self.fail("fake monitor-sensor still running")
 
     def test_end_to_end(self):
+        curve300 = ab.curve_pct(300.0)
+        curve3000 = ab.curve_pct(3000.0)
         started = time.monotonic()
         proc = self.start()
         try:
             data = self.wait_status(300.0)
-            self.assertEqual(data["target"], 65.0)
+            self.assertEqual(data["target"], curve300)
             result = self.run_script("status")
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout.splitlines()[:3],
-                             ["on", "lux 300", "target 65%"])
+                             ["on", "lux 300", f"target {curve300:.0f}%"])
             out, err = proc.communicate(timeout=15)
         finally:
             if proc.poll() is None:
@@ -674,8 +682,9 @@ class DaemonTest(TempDirTest):
             self.assertEqual(f.read(), "2")  # restarted once
         final = read_int(os.path.join(self.backlight, "brightness"))
         pct = ab.raw_to_pct(final, MAX)
-        self.assertGreaterEqual(pct, 85.0)  # 3000 lux: curve ~90 %, hysteresis 4
-        self.assertLessEqual(pct, 90.5)
+        # 3000 lux: curve ~95 %, hysteresis 4
+        self.assertGreaterEqual(pct, curve3000 - 5.0)
+        self.assertLessEqual(pct, curve3000 + 0.5)
         self.assertFalse(os.path.exists(  # its own writes are not overrides
             os.path.join(self.state, "yt11", "autobrightness-offset")))
         self.assertFalse(os.path.exists(os.path.join(self.rdir,
@@ -699,9 +708,10 @@ class DaemonTest(TempDirTest):
         self.assertFalse(os.path.exists(os.path.join(self.rdir,
                                                      "autobrightness-status")))
         self.assertEqual(read_int(os.path.join(self.backlight, "brightness")),
-                         raw(35))
+                         raw(ab.curve_pct(30.0)))
 
     def test_off_while_running(self):
+        target30 = ab.curve_pct(30.0)
         self.assertEqual(self.run_script("off").stdout, "off\n")
         proc = self.start(FAKE_MODE="hang")
         try:
@@ -711,11 +721,11 @@ class DaemonTest(TempDirTest):
                              2048)
             result = self.run_script("status")
             self.assertEqual(result.stdout.splitlines()[:3],
-                             ["off", "lux 30", "target 35%"])
+                             ["off", "lux 30", f"target {target30:.0f}%"])
             self.assertEqual(self.run_script("on").stdout, "on\n")
             time.sleep(1.5)
             self.assertEqual(read_int(os.path.join(self.backlight, "brightness")),
-                             raw(35))
+                             raw(target30))
             proc.send_signal(signal.SIGTERM)
             proc.communicate(timeout=5)
         finally:

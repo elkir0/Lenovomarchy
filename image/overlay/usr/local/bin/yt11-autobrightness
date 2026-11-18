@@ -44,11 +44,11 @@ USAGE = "usage: yt11-autobrightness [on|off|toggle|status]"
 # Brightness curve: (lux, percent) points, interpolated linearly on
 # log10(1 + lux). The +1 keeps 0 lux defined; above a few lux it is log10(lux).
 CURVE = (
-    (0.0, 5.0),
-    (3.0, 15.0),
-    (30.0, 35.0),
-    (300.0, 65.0),
-    (3000.0, 90.0),
+    (0.0, 20.0),
+    (3.0, 30.0),
+    (30.0, 45.0),
+    (300.0, 70.0),
+    (3000.0, 95.0),
     (10000.0, 100.0),
 )
 MIN_PCT = 3.0

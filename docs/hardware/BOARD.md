@@ -181,8 +181,10 @@ hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
 - Auto-brightness: `yt11-autobrightness`, started by Hyprland
   (`tablet.lua`), follows `monitor-sensor --light` and writes the sysfs
   `brightness` of the backlight `omarchy-hw-display` names. The target is
-  a curve on log10(lux): 0 lux 5 %, 3 lux 15 %, 30 lux 35 %, 300 lux
-  65 %, 3000 lux 90 %, 10000 lux and above 100 %, clamped to 3-100 %. Lux
+  a curve on log10(lux): 0 lux 20 %, 3 lux 30 %, 30 lux 45 %, 300 lux
+  70 %, 3000 lux 95 %, 10000 lux and above 100 %, clamped to 3-100 %
+  (raised on 2026-11-18: the first curve, 5 % at 0 lux and 15 % at 3 lux,
+  was too dim for the owner in a dark room). Lux
   is smoothed with a time constant of 1 s when the light rises and 3 s
   when it falls; the backlight moves only when the target is 4 points
   away, in a 0.5 s ramp. Moving the brightness by hand (shell slider,
@@ -193,7 +195,7 @@ hub and appear nowhere in the DT; see `INVENTORY.md`. Found on the unit
   prints the state and the last lux and target. Nothing is written while
   the panel is off (`bl_power` != 0) or at brightness 0, and readings
   taken then are ignored. Measured on the unit (2026-11-18, dim room):
-  3.5 lux gave 16 %, a slider move to 50 % was kept as a +34 offset and
+  with the first curve 3.5 lux gave 16 %, a slider move to 50 % was kept as a +34 offset and
   moving back to 16 % reset it; the reading did not change between 12 %
   and 50 % brightness (no feedback from the panel's own light), and the
   helper costs about 0.2 % of one core while idle. Not tested in daylight
