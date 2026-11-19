@@ -255,7 +255,7 @@ them.
   unverified.
 - **SSPM.** The kernel does not load SSPM firmware either: the v1 driver's
   probe only maps `cfgreg`, the IPI IRQ and the reserved memory
-  (`drivers/misc/mediatek/sspm/v1/sspm_helper.c:177-237`). The `sspm_1` and
+  (`drivers/misc/mediatek/sspm/v1/sspm_helper.c:178-227`). The `sspm_1` and
   `sspm_2` partitions exist (same notes file, line 209). MT6785 uses
   `CONFIG_MTK_TINYSYS_SSPM_SUPPORT=y` with `CONFIG_MTK_TINYSYS_SSPM_VERSION="v1"`
   (`arch/arm64/configs/yoga11_defconfig:213-214`). The kernel uses the SSPM
@@ -329,9 +329,9 @@ them.
 7. The last-core protocol for SPM idle is a non-secure write of
    `CPC_LAST_CORE_REQ` at 0x0C53A818, then a poll of the response at
    0x0C53A824 (`mtk_mcdi_governor_lib.c:60-100`). It is released by SMC
-   (5... event 3). Cluster-off needs no such request:
-   `cpc_cpusys_off_hw_prot()` is 1, meaning hardware protection
-   (`mtk_mcdi_plat.h:57`, `mtk_mcdi_governor_lib.c:102-125`).
+   0xC2000231 (3, 1 << 9) (`mtk_mcdi_governor_lib.c:37-48`). Cluster-off
+   needs no such request: `cpc_cpusys_off_hw_prot()` is 1, meaning hardware
+   protection (`mtk_mcdi_plat.h:57`, `mtk_mcdi_governor_lib.c:101-125`).
 
 ---
 
@@ -397,7 +397,7 @@ format. If the extended format is reported, bit 30 is the type bit
 (`src/mt6785-mainline/drivers/firmware/psci/psci.c:83-110`;
 `include/uapi/linux/psci.h:85-89`). The vendor encodings only make sense in
 the original format. `/sys/kernel/debug/psci` prints "Original/Extended
-StateID format" (`psci.c:424-432`). BOARD.md records "v1.1, no OSI" but not
+StateID format" (`psci.c:425-432`). BOARD.md records "v1.1, no OSI" but not
 the format: read it before any retry.
 
 ### 3.5 Comparison with mainline MediaTek SoCs
@@ -489,7 +489,7 @@ fragments give the states to all eight CPUs.
 
 **Side effect: s2idle timekeeping.** With valid DT states, `cpuidle-psci`
 registers instead of the WFI s2idle driver, which only binds when no other
-driver exists (`cpuidle-wfi-s2idle.c:62-64`). In platform-coordinated mode
+driver exists (`cpuidle-wfi-s2idle.c:63-65`). In platform-coordinated mode
 `cpuidle-psci` sets `enter_s2idle` only in the OSI hierarchy
 (`cpuidle-psci.c:253-271`). So s2idle would again stop freezing
 timekeeping (BOARD.md:528-540), unless `cpuidle-psci` is patched to give
@@ -798,7 +798,7 @@ identifies the SPM as the blocker for the ~132 mA floor.
 - **Broadcast is required.** The MCDI state is flagged
   `CPUIDLE_FLAG_TIMER_STOP` (`mtk_mcdi_state.c:68, 90`), so the tick core
   hands the CPU's timer to the broadcast device. The arch timer node has no
-  `always-on` (`mt6785.dts:761-768`, `clock-frequency` 13 MHz).
+  `always-on` (`mt6785.dts:761-769`, `clock-frequency` 13 MHz).
 - **Broadcast device.** It is the SoC system timer `mediatek,sys_timer` at
   0x10017000 (SPI 224, `TOP_CLK13M`, `mt6785.dts:753-759`). Its driver is
   `drivers/clocksource/mtk_systimer.c` **(remote)**:
