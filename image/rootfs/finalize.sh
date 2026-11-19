@@ -6,6 +6,17 @@
 
 set -euo pipefail
 
+# `omarchy update` removes orphans (omarchy-update-orphan-pkgs). Whatever the
+# build leaves installed as an unrequired dependency is wanted on the tablet:
+# on 2026-11-18 the first update removed linux-firmware-mediatek (the MT7663
+# Wi-Fi/Bluetooth firmware) and diffutils. Mark them explicit.
+orphans=$(pacman -Qdtq || true)
+if [[ -n $orphans ]]; then
+    echo "==> [finalize] Marking build orphans as explicitly installed: $(echo $orphans)"
+    # shellcheck disable=SC2086
+    pacman -D --asexplicit $orphans >/dev/null
+fi
+
 echo "==> [finalize] Recording installed package manifest to /etc/lenovomarchy-packages.txt"
 pacman -Q | sort > /etc/lenovomarchy-packages.txt
 echo "    Total installed packages: $(wc -l < /etc/lenovomarchy-packages.txt)"

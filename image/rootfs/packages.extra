@@ -91,3 +91,8 @@ i2c-tools
 ethtool
 iio-sensor-proxy
 libnotify
+
+# --- Power profiles (the shell's power menu talks to it) ---
+power-profiles-daemon
+# --- Removable drives: exFAT tools (NTFS is the kernel ntfs3 driver) ---
+exfatprogs

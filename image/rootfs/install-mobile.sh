@@ -100,6 +100,13 @@ rm -f "$HOME_DIR/.local/state/omarchy/toggles/screensaver-off" \
       "$HOME_DIR/.local/state/omarchy/toggles/lock-after-screensaver"
 mkdir -p "$HOME_DIR/.local/state/omarchy/toggles"
 touch "$HOME_DIR/.local/state/omarchy/toggles/stay-awake"
+# The account password the image ships ("alarm") has letters: record the
+# credential as a password so the lock screen and the polkit prompt open the
+# full keyboard (a PIN gets the number pad, on which it cannot be typed).
+# `omamobile-set-pin` changes both the secret and this choice.
+mkdir -p "$HOME_DIR/.config/omamobile"
+echo password > "$HOME_DIR/.config/omamobile/credential"
+touch "$HOME_DIR/.local/state/omarchy/toggles/credential-password"
 # omamobile turns suspend off (phones); suspend-to-idle works on this tablet,
 # so keep the system menu's Suspend entry.
 rm -f "$HOME_DIR/.local/state/omarchy/toggles/suspend-off"

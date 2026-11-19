@@ -21,7 +21,7 @@
 # Tablet port: Lenovomarchy (image/pkg/omamobile-omarchy)
 pkgname=omamobile-omarchy
 pkgver=0.1.48
-pkgrel=1
+pkgrel=2
 pkgdesc='Omarchy Mobile patch series for the Lenovo Yoga Tab 11 (YT-J706F): touch lock and shell patches over /usr/share/omarchy, re-applied after every Omarchy upgrade'
 arch=(any)
 url='https://github.com/derekross/omarchy-mobile'

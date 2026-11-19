@@ -84,3 +84,14 @@ tools/linux-test.sh [--timeout SECONDS] [--no-flash] <boot.img> <dtbo.img>
 - Exit codes: `0` `LINUX_UP` (saves `dmesg.log`, `uname.txt`, `model.txt`, `devices.txt`, `devices_deferred.txt` if present, `lsmod.txt`, `ip-addr.txt`), `3` `FELL_BACK` (runs `adb root`, waits for `sys.boot_completed=1`, saves `bootreason.txt` and decompressed/redacted `/sys/fs/pstore/*`), `4` `TIMEOUT` (default `420` s), `1` error.
 - All outputs are filtered through `redact` (no serial numbers or `Kernel command line` lines written to disk).
 - Offline test suite: `bash tests/linux-test/run-tests.sh`.
+
+## Checking the interface with nobody at the screen
+
+- `tools/ytshot <out.png> [scale]`: screenshot of the tablet's screen (grim in
+  the Hyprland session), copied to the Mac.
+- `tools/faketouch.py`: runs on the tablet as root (copy it to `/tmp`) and
+  injects taps, long presses and swipes through a uinput touchscreen;
+  `--transform 1` takes screen coordinates when the tablet stands in
+  landscape. Used on 2026-11-18 to go through the lock screen (swipe up,
+  password on the on-screen keyboard), the recent-apps gesture and an app
+  launch.

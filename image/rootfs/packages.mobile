@@ -19,6 +19,8 @@ gst-plugins-good
 gst-plugins-ugly
 gst-plugin-pipewire
 pipewire-libcamera
+# `cam`, to test a camera without the app (same build as libcamera)
+libcamera-tools
 
 # --- Omarchy Mobile extras (repacked, verified) ---
 omamobile-settings

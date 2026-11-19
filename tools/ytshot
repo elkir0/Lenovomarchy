@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Screenshot of the tablet's screen (grim in the Hyprland session), copied
+# to the Mac. With faketouch.py, lets an agent check the interface with
+# nobody at the screen.
+#
+# Usage: tools/ytshot <out.png> [scale]      (scale default 0.5)
+
+set -euo pipefail
+OUT="${1:?usage: $0 <out.png> [scale]}"
+SCALE="${2:-0.5}"
+O=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+ssh "${O[@]}" root@192.168.77.1 "sig=\$(ls /run/user/1000/hypr | head -1); runuser -u alarm -- env XDG_RUNTIME_DIR=/run/user/1000 HYPRLAND_INSTANCE_SIGNATURE=\$sig WAYLAND_DISPLAY=wayland-1 grim -s $SCALE /tmp/ytshot.png && cat /tmp/ytshot.png" > "$OUT"
