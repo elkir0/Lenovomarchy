@@ -58,6 +58,12 @@ echo "==> [install-mobile] Running omamobile-setup-user --adopt for $USER_NAME"
 # user's copies itself, exactly from the package's profiles:
 su - "$USER_NAME" -c 'omamobile-setup-user --adopt'
 cp -f /usr/share/omamobile/shell/profile/shell.json "$HOME_DIR/.config/omarchy/shell.json"
+# The phone profile never locks on idle (idle.lock 0): a tablet left on its
+# stand would stay lit until the battery is empty. Lock after 5 minutes; the
+# lock blanks the screen 10 s later and a touch brings it back (checked on
+# the unit, 2026-11-18). Suspend stays manual (power button, system menu).
+jq '.idle.lock = 300' "$HOME_DIR/.config/omarchy/shell.json" > "$HOME_DIR/.config/omarchy/shell.json.new"
+mv "$HOME_DIR/.config/omarchy/shell.json.new" "$HOME_DIR/.config/omarchy/shell.json"
 mkdir -p "$HOME_DIR/.config/omamobile"
 cp -f /usr/share/omamobile/shell/profile/home.json "$HOME_DIR/.config/omamobile/home.json"
 chown "$USER_NAME:$USER_NAME" "$HOME_DIR/.config/omarchy/shell.json" \

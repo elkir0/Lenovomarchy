@@ -36,7 +36,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Thermal (LVTS) | works | Throttling at 85 °C |
 | Suspend (s2idle) | partial | Works, Wi-Fi back on resume; ~135 mA asleep (about 48 h) |
 | Suspend (deep), CPU idle states | missing | Need MediaTek's SPM/MCDI firmware handling |
-| Hardware video decode/encode | missing | No `mtk-vcodec` support for MT6785 |
+| Hardware video decode/encode | missing | Not feasible without Android's proprietary `vpud` daemon: the codec's register programming lives there (`docs/research/VIDEO-DECODE-MT6785.md`) |
 | Keyboard accessory (pogo) | missing | Not ported |
 | Headphone jack, cover sensor, modem, GNSS | n/a | Not fitted on the Wi-Fi model |
 
@@ -47,9 +47,9 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Omarchy 4.5.0-3 + Omarchy Mobile 0.1.48 / shell 0.2.133 | works | `docs/research/omamobile/STATUS-20261117.md` |
 | Image build (`image/build-rootfs.sh`) | works | Fresh flash on a wiped `userdata` tested on 2026-11-18 (`image/README.md`, Fresh install); the non-redistributable firmware is installed afterwards over USB |
 | Firewall (ufw) | works | IPv6 rules load since 2026-11-18 |
-| Lock-screen keypad, shell gestures | untested | Need a person at the screen |
-| `omarchy update` on the tablet | untested | Migrations to hold are listed in `image/rootfs/omarchy-migrations.hold` |
-| Camera app (omacam) | partial | Viewfinder and AF checked; photo, video and camera switch not checked |
+| Lock screen, shell gestures | works | Checked on 2026-11-18 with injected touches (`tools/faketouch.py`) and screenshots: swipe up, password on the on-screen keyboard, recent apps, app launch; locks after 5 minutes idle and blanks 10 s later, a touch wakes it. Not yet done by hand |
+| `omarchy update` on the tablet | works | Ran on 2026-11-18 after two fixes (keyring step, orphan cleanup that removed the Wi-Fi firmware package); migrations to hold are listed in `image/rootfs/omarchy-migrations.hold` |
+| Camera app (omacam) | works | Viewfinder and AF checked; photo with each camera (3260x2448), camera switch and a video (1080p H.264 + Opus) taken through the app's buttons by injected touches on 2026-11-18; pictures not looked at |
 
 ## Milestones
 
@@ -63,7 +63,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - [ ] Charging from a wall charger (USB PD) and over a full charge.
 - [ ] With the owner: feel the vibrator, insert a microSD card, try the pen,
       unlock with the keypad, the shell gestures, photo/video in omacam.
-- [ ] Run `omarchy update` once on the tablet and keep the hold list current.
+- [x] Run `omarchy update` once on the tablet and keep the hold list current.
 - [x] Flash the image `image/build-rootfs.sh` produces on a wiped `userdata`
       and go through first boot (2026-11-18; the build now ships the A/B
       slot service, `tools/flash-rootfs.sh` writes the image).
@@ -97,10 +97,13 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - Understand SPM/MCDI enough for CPU idle states and `deep` sleep: the main
   lever on the ~135 mA standby floor.
 
-### R5: video
+### R5: video (closed)
 
-- Port `mtk-vcodec` (decoder first) to MT6785 and expose it through V4L2
-  stateless/stateful decoding for GStreamer and browsers.
+- Studied on 2026-11-18 (`docs/research/VIDEO-DECODE-MT6785.md`): the
+  decoder is of the MT8183 family and mainline has its clocks, power
+  domains and IOMMU ports, but the vendor runs the codec from a proprietary
+  user-space daemon (`vpud`) and no VPU or SCP firmware exists for this
+  chip. Video stays decoded on the CPU.
 
 ### R6: remaining hardware
 
