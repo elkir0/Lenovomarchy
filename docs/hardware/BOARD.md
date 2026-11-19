@@ -356,9 +356,12 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
     `I2S2_HD_Mux` stay `Low_Jitter` even in its "HD_OFF" paths);
     `yt11-audio-defaults` does the same. Whether the amps need it was not
     tested.
-- At boot the AFE logs `-EBUSY` on register 0x52c
-  (`I2S1_TINYCONN_CH1_MUX DAPM update failed`) while it is runtime
-  suspended. Playback is not affected; not investigated yet.
+- Until 2026-11-18 the AFE logged `-EBUSY` on register 0x52c at boot
+  (`I2S1_TINYCONN_CH1_MUX DAPM update failed`): the header defined
+  `AFE_ASRC_2CH_CON12/13` at 0x528/0x52c (the MT8183 layout), which are
+  `AFE_TINY_CONN4/5` on this SoC, so those were treated as volatile and
+  could not be read or written while the AFE was runtime suspended. Fixed
+  in the `yt11` branch; the four tinyconn muxes read NONE.
 - Amp DSP firmware (Cirrus "prince" protection): `cs35l41-dsp1-spk-prot.wmfw`
   with per-amp tunings `cs35l41-dsp1-spk-prot1..4.bin`, plus calibration
   variants, in the vendor partition's `/firmware` (not redistributable).
