@@ -454,7 +454,11 @@ CPU-hotplug test (step 4) and a probe module (steps 3 and 5):
    `kernel/experiments/dcxo-poke`. 1 means loaded but not kicked; 2 means
    kicked. The SMC only reports a state; that it changes nothing is
    unverified.
-4. CPU7 hotplug off and back on. This is PSCI `CPU_OFF` and `CPU_ON` on the
+4. **Do not run this one without someone at the tablet.** Tried on
+   2026-11-18: taking CPU7 offline froze the unit at once, with no watchdog
+   reset (`docs/hardware/BOARD.md`, CPU hotplug). So `CPU_OFF` already
+   fails without the vendor's setup, and idle power-down cannot work
+   either. As first proposed: CPU7 hotplug off and back on. This is PSCI `CPU_OFF` and `CPU_ON` on the
    same CPC power-down hardware as `mcdi-cpu`. If it fails, idle power-down
    cannot work either.
 5. Reads of `CPC_SPMC_PWR_STATUS` at 0x0C53A840 and of SSPM mailbox 3,

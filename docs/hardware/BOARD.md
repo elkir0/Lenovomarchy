@@ -556,6 +556,17 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   loads); without them the firmware's CPU_SUSPEND never returns. So no
   PSCI idle states until MCDI/SPM is understood; the experiment was
   reverted.
+- **CPU hotplug freezes the unit too (2026-11-18)**: `echo 0 >
+  /sys/devices/system/cpu/cpu7/online` (PSCI `CPU_OFF`) hung user space at
+  once: the unit still answers ping and completes TCP handshakes on port 22
+  (kernel), but no process runs, and the watchdog does not reset it; only a
+  forced restart by hand (long press on the power button) recovers.
+  Nothing that powers a core down works on this kernel: no CPU offline, no
+  PSCI idle state, no `deep` suspend (which offlines the secondary CPUs).
+  `docs/research/CPUIDLE-MT6785.md` lists what the vendor kernel sets up
+  first (SPM firmware kick, MCDI SMCs, SSPM mailbox); a kernel without
+  `CONFIG_HOTPLUG_CPU` would remove the trap (s2idle does not need it) but
+  was not built.
 - Instead, kernel `yt11` 5861307a8 adds a WFI-only cpuidle driver
   (`CONFIG_ARM64_WFI_S2IDLE_CPUIDLE`, binds on MT6785 only): state 0 WFI
   for runtime idle, state 1 WFI with `->enter_s2idle()` and a target

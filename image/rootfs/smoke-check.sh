@@ -130,7 +130,7 @@ expect_version() {  # <pkg> <expected pkgver-pkgrel>
 }
 expect_version omarchy            "4.5.0-3"
 expect_version omarchy-settings   "4.5.0-3"
-expect_version omamobile-omarchy  "0.1.48-1"
+expect_version omamobile-omarchy  "0.1.48-2"
 expect_version omamobile-shell    "0.2.133-3"
 expect_version libcamera         "0.7.2-4.7"
 expect_version omacam             "0.3.3-1"
