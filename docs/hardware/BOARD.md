@@ -567,6 +567,12 @@ DCXO buffers, the RTC 32 kHz output (`RTC_CON` F32KOB clear).
   first (SPM firmware kick, MCDI SMCs, SSPM mailbox); a kernel without
   `CONFIG_HOTPLUG_CPU` would remove the trap (s2idle does not need it) but
   was not built.
+  The journal of that boot, read after the restart on 2026-11-19, shows
+  the kernel stayed alive for the four hours: 201 RCU stall reports, every
+  one naming CPU 6 (the other big core, not the one taken offline), with
+  the grace-period kthread starved. So the hang is CPU 6 no longer
+  answering once CPU 7 is asked to stop, not a dead kernel; journald kept
+  writing, new processes did not start.
 - Instead, kernel `yt11` 5861307a8 adds a WFI-only cpuidle driver
   (`CONFIG_ARM64_WFI_S2IDLE_CPUIDLE`, binds on MT6785 only): state 0 WFI
   for runtime idle, state 1 WFI with `->enter_s2idle()` and a target

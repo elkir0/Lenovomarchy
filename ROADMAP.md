@@ -46,9 +46,9 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Piece | State | Notes |
 |---|---|---|
 | Omarchy 4.5.0-3 + Omarchy Mobile 0.1.48 / shell 0.2.133 | works | `docs/research/omamobile/STATUS-20261117.md` |
-| Image build (`image/build-rootfs.sh`) | works | Fresh flash on a wiped `userdata` tested on 2026-11-18 (`image/README.md`, Fresh install); the non-redistributable firmware is installed afterwards over USB |
+| Image build (`image/build-rootfs.sh`) | works | Fresh flash on a wiped `userdata` tested on 2026-11-18 and again on 2026-11-19 with the final image (`image/README.md`, Fresh install); the non-redistributable firmware is installed afterwards over USB |
 | Firewall (ufw) | works | IPv6 rules load since 2026-11-18 |
-| Lock screen, shell gestures | works | Checked on 2026-11-18 with injected touches (`tools/faketouch.py`) and screenshots: swipe up, password on the on-screen keyboard, recent apps, app launch; locks after 5 minutes idle and blanks 10 s later, a touch wakes it. Not yet done by hand |
+| Lock screen, shell gestures | works | Checked on 2026-11-18 with injected touches (`tools/faketouch.py`) and screenshots: swipe up, password on the on-screen keyboard, recent apps, app launch; locks when idle and blanks 10 s later, a touch wakes it (checked on 2026-11-19 with a 25 s timeout; the mobile profile disables the shell's idle service, the image enables it with 5 minutes). Not yet done by hand |
 | `omarchy update` on the tablet | works | Ran on 2026-11-18 after two fixes (keyring step, orphan cleanup that removed the Wi-Fi firmware package); migrations to hold are listed in `image/rootfs/omarchy-migrations.hold` |
 | Camera app (omacam) | works | Viewfinder and AF checked; photo with each camera (3260x2448), camera switch and a video (1080p H.264 + Opus) taken through the app's buttons by injected touches on 2026-11-18; pictures not looked at |
 
@@ -126,22 +126,25 @@ pushed without the owner), and the partitions `CLAUDE.md` forbids.
 
 The last session ran unattended on the night of 2026-11-18. What it left:
 
-- **On the tablet**: the image flashed on 2026-11-18 plus the night's fixes
-  applied in place, and the kernel of `yt11` at `fec216c2b` in `boot_a`.
+- **On the tablet**: the image `image/build-rootfs.sh` built on 2026-11-18
+  at 22:54, flashed on a wiped `userdata` on 2026-11-19 with the kernel of
+  `yt11` at `fec216c2b` in `boot_a`, then the three firmware sets, the
+  Wi-Fi profile and the time zone. Checked after that flash: no failed
+  unit, Wi-Fi connected, one backlight device, four speaker DSPs and the
+  voice processor loaded, both cameras listed by `cam -l`, silent playback
+  and a capture through PipeWire. One change was made in place after the
+  flash and is in `image/rootfs/install-mobile.sh` for the next build: the
+  shell's idle service enabled (the flashed image never locked by itself).
 - **Checked without a person** (injected touches and screenshots): lock
   screen and unlock, recent-apps gesture, app launch, the camera app's
-  photo, video and camera switch, `omarchy update`, auto-lock after 5
-  minutes. Sound was only tested silent at night (stream opens, no error).
+  photo, video and camera switch, `omarchy update`, auto-lock when idle. Sound was only tested silent at night (stream opens, no error).
 - **Not checked by a person**: touch by hand, a sound from the speakers
   and the microphones after the last kernel, the screen in daylight,
   vibrator, microSD, pen, keyboard accessory, wall charger.
 - **Hazard**: never take a CPU offline, enable a PSCI idle state or use
   `deep` suspend (`BOARD.md`, CPU hotplug). The night session did the first
-  one as a probe and the tablet stayed frozen until restarted by hand.
-- **Image**: `image/build-rootfs.sh` builds with all of the above and passes its
-  smoke check (2026-11-18, 22:54), but that image was **not flashed**: the
-  tablet was frozen by then. The last image tested by a fresh flash is the
-  one of the afternoon of 2026-11-18.
+  one as a probe and the tablet stayed frozen for four hours, until it was
+  restarted (CPU 6 stalled, the kernel itself stayed alive).
 - **Open work, by value**: CPU idle states and deep sleep (R4), the
   microphones' voice mode and the reason the voice processor needs a slow
   I2C bus (R3), lens shading (R2), proximity and keyboard accessory (R6).
