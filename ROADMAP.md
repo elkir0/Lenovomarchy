@@ -1,7 +1,8 @@
 # Roadmap
 
 Where the YT-J706F port stands and what is left before it is a fully working
-Omarchy tablet. Updated 2026-11-18. Facts come from `docs/hardware/` (read on
+Omarchy tablet. Updated 2026-11-19, when work on the project stopped
+(see "Where it stopped" at the end). Facts come from `docs/hardware/` (read on
 the unit); this file only summarises them and orders the work.
 
 Legend: **works** (tested on the unit), **partial** (works with a known gap),
@@ -19,7 +20,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Pen (Precision Pen 2, through the touch chip) | untested | No pen at hand so far |
 | GPU (Mali-G76, Panfrost) | works | |
 | Wi-Fi (MT7663 SDIO) | works | 2.4 GHz measured; 5 GHz not measured |
-| Bluetooth (MT7663 SDIO) | works | Scan works; loaded before Wi-Fi (shared ROM patch) |
+| Bluetooth (MT7663 SDIO) | works | Scan works; loaded before Wi-Fi (shared ROM patch); RFCOMM (hands-free, headset profiles) and BNEP in the kernel since 2026-11-18, no device paired yet |
 | Speakers (4x CS35L41) | works | Stereo through the protection DSP; no factory calibration |
 | Microphones (AS33970 voice processor) | partial | Since 2026-11-18: firmware loaded by `snd-soc-as33970` (ready 31 s after power-on), stereo capture through PipeWire with a fixed +15 dB (voice heard back by the owner); voice-processing mode untested (`BOARD.md`, Audio wiring) |
 | Battery gauge (bq27541) | works | |
@@ -35,7 +36,7 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 | Front camera (S5K4H7) | partial | libcamera + omacam, stock colour matrices; no lens shading correction |
 | Thermal (LVTS) | works | Throttling at 85 °C |
 | Suspend (s2idle) | partial | Works, Wi-Fi back on resume; ~135 mA asleep (about 48 h) |
-| Suspend (deep), CPU idle states | missing | Need MediaTek's SPM/MCDI firmware handling |
+| Suspend (deep), CPU idle states, CPU hotplug | missing | Anything that powers a core down freezes the unit with no watchdog reset (`BOARD.md`); needs the vendor's SPM/MCDI setup (`docs/research/CPUIDLE-MT6785.md`) |
 | Hardware video decode/encode | missing | Not feasible without Android's proprietary `vpud` daemon: the codec's register programming lives there (`docs/research/VIDEO-DECODE-MT6785.md`) |
 | Keyboard accessory (pogo) | missing | Not ported |
 | Headphone jack, cover sensor, modem, GNSS | n/a | Not fitted on the Wi-Fi model |
@@ -95,7 +96,12 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 - Find the extra ~50 mA the speaker DSP firmware costs in system sleep (the
   sleep hook unloads it meanwhile).
 - Understand SPM/MCDI enough for CPU idle states and `deep` sleep: the main
-  lever on the ~135 mA standby floor.
+  lever on the ~135 mA standby floor. Studied on 2026-11-18
+  (`docs/research/CPUIDLE-MT6785.md`): the vendor kernel kicks the SPM
+  firmware and configures MCDI through SiP SMCs and an SSPM mailbox before
+  its first `CPU_SUSPEND`; a module replaying that sequence is the next
+  experiment, with someone at the tablet (a failed try needs a forced
+  restart by hand).
 
 ### R5: video (closed)
 
@@ -115,3 +121,28 @@ Legend: **works** (tested on the unit), **partial** (works with a known gap),
 
 Android coexistence (the tablet runs Linux only), publishing (nothing is
 pushed without the owner), and the partitions `CLAUDE.md` forbids.
+
+## Where it stopped (2026-11-19)
+
+The last session ran unattended on the night of 2026-11-18. What it left:
+
+- **On the tablet**: the image flashed on 2026-11-18 plus the night's fixes
+  applied in place, and the kernel of `yt11` at `fec216c2b` in `boot_a`.
+- **Checked without a person** (injected touches and screenshots): lock
+  screen and unlock, recent-apps gesture, app launch, the camera app's
+  photo, video and camera switch, `omarchy update`, auto-lock after 5
+  minutes. Sound was only tested silent at night (stream opens, no error).
+- **Not checked by a person**: touch by hand, a sound from the speakers
+  and the microphones after the last kernel, the screen in daylight,
+  vibrator, microSD, pen, keyboard accessory, wall charger.
+- **Hazard**: never take a CPU offline, enable a PSCI idle state or use
+  `deep` suspend (`BOARD.md`, CPU hotplug). The night session did the first
+  one as a probe and the tablet stayed frozen until restarted by hand.
+- **Image**: `image/build-rootfs.sh` builds with all of the above and passes its
+  smoke check (2026-11-18, 22:54), but that image was **not flashed**: the
+  tablet was frozen by then. The last image tested by a fresh flash is the
+  one of the afternoon of 2026-11-18.
+- **Open work, by value**: CPU idle states and deep sleep (R4), the
+  microphones' voice mode and the reason the voice processor needs a slow
+  I2C bus (R3), lens shading (R2), proximity and keyboard accessory (R6).
+  Hardware video decode is closed (R5).

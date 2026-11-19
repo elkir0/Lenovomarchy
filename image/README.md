@@ -129,6 +129,11 @@ and the speakers play without their protection DSP, until they are
 installed over USB. Wi-Fi is then set up on the tablet. The bring-up probes
 (`yt11-dsirate` and the like) are not part of the image.
 
+First settings on the tablet: the account is `alarm`, password `alarm`
+(`omamobile-set-pin` changes it and chooses a PIN or a password); the lock
+screen comes after 5 minutes idle and asks for it on the full keyboard. The
+time zone is UTC (`timedatectl set-timezone <zone>`).
+
 A full build downloads the pinned Omarchy/Omarchy Mobile packages (cached in
 `cache/`), compiles `omamobile-omarchy`, `omamobile-shell` and the libcamera
 split package inside arm64 Docker containers (libcamera is the slow one), then
