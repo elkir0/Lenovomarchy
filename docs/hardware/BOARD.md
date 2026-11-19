@@ -256,9 +256,12 @@ vendor's exponential mapping, a DSI brightness of 28 % (PWM readback
 0x12/0x13 = 569 of 2047) is about 1 % of the LED current: the screen looked
 dim at every setting. The board DT now uses the linear mapping, four
 strings and `kinetic,full-scale-reg = <0xa0>` (a `yt11` addition to
-`lm36274_bl`), and keeps the I2C level at 2047: a udev rule sets it and
-`systemd-backlight` is masked for `lm36274-backlight`, which it restored
-to an older 800. The brightness users move is the DSI one.
+`lm36274_bl`), and `kinetic,pwm-brightness-only` (same): the I2C level
+stays at 2047 and the chip registers no backlight device, so the DSI one
+is the only brightness. With two devices the shell's slider
+(`brightnessctl --class=backlight`, first device) moved the I2C level
+while auto-brightness moved the DSI one, and `systemd-backlight` restored
+an older I2C level of 800.
 
 ## GPIO table of the vendor project (`tb8185p3_64.dws`)
 

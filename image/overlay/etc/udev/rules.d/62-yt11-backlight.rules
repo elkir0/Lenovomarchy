@@ -4,8 +4,3 @@
 # DSI backlight (DCS brightness, the panel's PWM into the LM36274) is the
 # one Omarchy drives.
 SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys%p/bl_power", RUN+="/bin/chmod g+w /sys%p/bl_power"
-
-# The LM36274's own level stays at its maximum: the brightness users move is
-# the DSI one, which multiplies it. systemd-backlight is masked for this
-# device (it would restore an older level).
-SUBSYSTEM=="backlight", ACTION=="add", KERNEL=="lm36274-backlight", ATTR{brightness}="2047"
