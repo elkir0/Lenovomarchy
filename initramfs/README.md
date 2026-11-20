@@ -50,7 +50,7 @@ under 8 MiB and runs as PID 1.
 |-----|--------|
 | `yt11.nowdt=1` | do not start the watchdog daemon |
 | `yt11.autotest=1` | run `/autotest.sh` then reboot (sysrq-b) |
-| `yt11.root=<dev>` | switch_root to this device after setup |
+| `yt11.root=<dev>` | switch_root to this device after setup; `PARTLABEL=<name>` finds the GPT partition of that name (`PARTLABEL=userdata`) |
 | `yt11.rootfstype=<fs>` | its file system type (default `ext4`) |
 | `yt11.rootflags=<opts>` | extra mount options for it |
 
@@ -58,6 +58,7 @@ under 8 MiB and runs as PID 1.
 
 ```sh
 YT11_SSH_PUBKEY=~/.ssh/id_ed25519.pub bash initramfs/build.sh
+# YT11_SSH_PUBKEY=none: no key, SSH stays off in the initramfs (published images)
 # optional: YT11_AUTOTEST=./my-test.sh (installed as /autotest.sh)
 bash initramfs/test-qemu.sh               # prints PASS
 ```

@@ -106,6 +106,9 @@ bash image/tools/build-pkg --src image/camera/libcamera-yt11 libcamera
 
 ## Fresh install
 
+For installing from prebuilt release files instead of building from source,
+see [docs/INSTALL.md](../docs/INSTALL.md).
+
 Tested on 2026-11-18 on the unit (wiped `userdata`, first boot to the
 Omarchy session in about 30 s, root grown to the partition's 110 GiB, slot
 marked successful, no failed unit):

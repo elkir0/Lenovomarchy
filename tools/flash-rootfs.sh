@@ -17,10 +17,24 @@ IMG="$(cd "$(dirname "$IMG")" && pwd)/$(basename "$IMG")"
 SIMG="${IMG%.img}.simg"
 
 if [[ ! -f "$SIMG" || "$IMG" -nt "$SIMG" ]]; then
-    docker run --rm --platform linux/arm64 -v "$IMG:/img/rootfs.img:ro" \
-        -v "$(dirname "$SIMG"):/out" lenovomarchy-kbuild sh -ec '
-            command -v img2simg >/dev/null || { apt-get update -qq >/dev/null; apt-get install -y -qq android-sdk-libsparse-utils >/dev/null; }
-            img2simg /img/rootfs.img "/out/'"$(basename "$SIMG")"'"'
+    if command -v img2simg >/dev/null 2>&1; then
+        img2simg "$IMG" "$SIMG"
+    elif docker image inspect lenovomarchy-kbuild >/dev/null 2>&1; then
+        docker run --rm --platform linux/arm64 -v "$IMG:/img/rootfs.img:ro" \
+            -v "$(dirname "$SIMG"):/out" lenovomarchy-kbuild sh -ec '
+                command -v img2simg >/dev/null || { apt-get update -qq >/dev/null; apt-get install -y -qq android-sdk-libsparse-utils >/dev/null; }
+                img2simg /img/rootfs.img "/out/'"$(basename "$SIMG")"'"'
+    else
+        platform_args=()
+        case "$(uname -m)" in
+            arm64|aarch64) platform_args=(--platform linux/arm64) ;;
+        esac
+        docker run --rm ${platform_args[@]+"${platform_args[@]}"} -v "$IMG:/img/rootfs.img:ro" \
+            -v "$(dirname "$SIMG"):/out" debian:bookworm-slim sh -ec '
+                apt-get update -qq >/dev/null
+                apt-get install -y -qq android-sdk-libsparse-utils >/dev/null
+                img2simg /img/rootfs.img "/out/'"$(basename "$SIMG")"'"'
+    fi
 fi
 ls -l "$SIMG" | awk '{print "sparse image:", $5, "bytes"}'
 

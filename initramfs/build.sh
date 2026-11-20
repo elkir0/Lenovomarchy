@@ -3,9 +3,11 @@
 # Docker container: out/initramfs/initramfs.cpio.gz (newc, gzip -9,
 # root-owned entries) plus out/initramfs/contents.txt.
 #
-# Required environment:
+# Environment:
 #   YT11_SSH_PUBKEY  path to a .pub file installed as
-#                    /root/.ssh/authorized_keys (mode 600)
+#                    /root/.ssh/authorized_keys (mode 600), or the word
+#                    "none": no key, so /init leaves SSH off in the
+#                    initramfs (images meant to be published)
 # Optional:
 #   YT11_AUTOTEST    path to a script installed as /autotest.sh (755)
 
@@ -27,14 +29,18 @@ abspath() {
     esac
 }
 
-[ -n "${YT11_SSH_PUBKEY:-}" ] || die "YT11_SSH_PUBKEY is required (path to a .pub file)"
-PUBKEY=$(abspath "$YT11_SSH_PUBKEY")
-[ -f "$PUBKEY" ] || die "public key file not found: $PUBKEY"
-# Never let a private key slip into the image.
-if grep -q 'PRIVATE KEY' "$PUBKEY"; then
-    die "refusing $PUBKEY: file contains a PRIVATE KEY"
+[ -n "${YT11_SSH_PUBKEY:-}" ] || die "YT11_SSH_PUBKEY is required (path to a .pub file, or none)"
+PUBKEY_MOUNT=()
+if [ "$YT11_SSH_PUBKEY" != none ]; then
+    PUBKEY=$(abspath "$YT11_SSH_PUBKEY")
+    [ -f "$PUBKEY" ] || die "public key file not found: $PUBKEY"
+    # Never let a private key slip into the image.
+    if grep -q 'PRIVATE KEY' "$PUBKEY"; then
+        die "refusing $PUBKEY: file contains a PRIVATE KEY"
+    fi
+    [ -s "$PUBKEY" ] || die "public key file is empty: $PUBKEY"
+    PUBKEY_MOUNT=(-v "$PUBKEY:/src-pubkey:ro")
 fi
-[ -s "$PUBKEY" ] || die "public key file is empty: $PUBKEY"
 
 AUTOTEST_MOUNT=()
 if [ -n "${YT11_AUTOTEST:-}" ]; then
@@ -51,7 +57,7 @@ mkdir -p "$OUT_DIR"
 docker run --rm --platform linux/arm64 \
     -v "$SCRIPT_DIR/init:/src-init:ro" \
     -v "$SCRIPT_DIR/files:/src-files:ro" \
-    -v "$PUBKEY:/src-pubkey:ro" \
+    ${PUBKEY_MOUNT[@]+"${PUBKEY_MOUNT[@]}"} \
     ${AUTOTEST_MOUNT[@]+"${AUTOTEST_MOUNT[@]}"} \
     -v "$OUT_DIR:/out" \
     alpine:3.22 sh -euc '
@@ -73,7 +79,9 @@ docker run --rm --platform linux/arm64 \
         cp -a /src-files/. "$S/"
 
         mkdir -p "$S/root/.ssh"
-        install -m 0600 /src-pubkey "$S/root/.ssh/authorized_keys"
+        if [ -e /src-pubkey ]; then
+            install -m 0600 /src-pubkey "$S/root/.ssh/authorized_keys"
+        fi
         chmod 0700 "$S/root/.ssh"
 
         if [ -e /src-autotest ]; then
@@ -91,10 +99,12 @@ docker run --rm --platform linux/arm64 \
         # Sanity checks on the pieces the init script depends on.
         for f in init bin/busybox sbin/init sbin/getty sbin/switch_root \
                  sbin/watchdog usr/sbin/dropbear usr/sbin/dnsmasq \
-                 root/.ssh/authorized_keys etc/inittab \
+                 etc/inittab \
                  etc/dnsmasq-usb0.conf etc/passwd; do
             [ -e "$S/$f" ] || { echo "build.sh: missing in stage: $f" >&2; exit 1; }
         done
+        [ ! -e /src-pubkey ] || [ -s "$S/root/.ssh/authorized_keys" ] || {
+            echo "build.sh: authorized_keys missing in stage" >&2; exit 1; }
         [ ! -e /src-autotest ] || [ -x "$S/autotest.sh" ] || {
             echo "build.sh: autotest.sh not executable in stage" >&2; exit 1; }
 

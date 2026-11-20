@@ -256,6 +256,21 @@ if [ -n "$rootdev" ]; then
     log "root: waiting up to 10s for $rootdev (fstype $rootfstype)"
     n=0
     while [ "$n" -lt 10 ]; do
+        case $rootdev in
+            PARTLABEL=*)
+                # Resolve a GPT partition name through sysfs (busybox has
+                # no PARTLABEL lookup), so the boot image does not depend
+                # on a unit's partition numbering.
+                for u in /sys/class/block/*/uevent; do
+                    if grep -qx "PARTNAME=${rootdev#PARTLABEL=}" "$u" 2>/dev/null; then
+                        d=$(sed -n 's/^DEVNAME=//p' "$u")
+                        log "root: $rootdev is /dev/$d"
+                        rootdev=/dev/$d
+                        break
+                    fi
+                done
+                ;;
+        esac
         [ -b "$rootdev" ] && break
         n=$((n + 1))
         sleep 1
