@@ -72,6 +72,12 @@ About**.
   restoring Android; see
   [official_recovery_paths.md](research/notes/official_recovery_paths.md).
   Unlocking the bootloader also drops Widevine DRM to L3.
+- **The release path has not been run end to end.** The root filesystem in
+  the release comes from the same build that runs on the reference unit, but
+  `tools/install.sh`, the keyless boot image and its
+  `yt11.root=PARTLABEL=userdata` root lookup were only tested on the Mac
+  (`tests/`), not by a real install on a tablet. If the tablet does not
+  come up, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) and open an issue.
 - **Lenovo firmware is not included.** The prebuilt release contains no SSH
   keys and none of Lenovo's proprietary firmware for the touch controller,
   speaker protection DSP, or microphone voice processor. Until you install

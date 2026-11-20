@@ -40,6 +40,9 @@ then follow [docs/INSTALL.md](docs/INSTALL.md) to unlock the bootloader, run
 `tools/install.sh`, and extract the three non-redistributable Lenovo firmware
 sets from your own `super` image.
 
+The first release (v0.1.0) has not been installed from scratch on a tablet
+yet: the installer and the release boot image were only tested on the Mac.
+
 ## Build from source
 
 See [docs/BUILD.md](docs/BUILD.md) for the full source build and flashing
