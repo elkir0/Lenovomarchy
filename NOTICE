@@ -1,0 +1,7 @@
+Scope of the MIT licence in LICENSE: it covers the files written for this project (scripts,
+tools, configuration, documentation). Patch files keep the licence of the
+work they modify: the libcamera patches under image/camera/ are
+LGPL-2.1-or-later, the Omarchy and Omarchy Mobile patches under image/pkg/
+follow those projects' licences, and the kernel (a separate repository,
+https://github.com/elkir0/mt6785-mainline) is GPL-2.0. Lenovo's firmware is
+not part of this repository or of its release files.

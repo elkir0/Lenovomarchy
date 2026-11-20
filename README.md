@@ -112,6 +112,6 @@ forbidden partitions, and `private/` handling live in
 ## Licence
 
 This repository's own files are licensed under the MIT License; see
-[LICENSE](LICENSE). Patches keep the licence of what they modify, the Linux
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Patches keep the licence of what they modify, the Linux
 kernel tree is GPL-2.0 in its own repository, and Lenovo's proprietary
 firmware is not included.
